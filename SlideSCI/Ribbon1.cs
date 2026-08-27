@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Text;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -30,6 +31,7 @@ namespace SlideSCI
         private List<int> selectedShapeIdsByOrder = new List<int>();
         private SpacingForm spacingForm = null;
         private ScaleForm scaleForm = null;
+        private Timer settingsSaveTimer;
 
         public enum AlignmentPosition
         {
@@ -46,6 +48,59 @@ namespace SlideSCI
 
         private AlignmentPosition lastCopiedAlignment = AlignmentPosition.Center;
         private AlignmentPosition lastSwapAlignment = AlignmentPosition.TopLeft;
+
+        private bool TryGetActiveSlide(out Slide slide)
+        {
+            slide = null;
+            try
+            {
+                if (app == null)
+                {
+                    app = Globals.ThisAddIn.Application;
+                }
+
+                return PowerPointContext.TryGetActiveSlide(app, out slide);
+            }
+            catch
+            {
+                slide = null;
+                return false;
+            }
+        }
+
+        private static bool TryParseFloat(string text, out float value)
+        {
+            const NumberStyles styles = NumberStyles.Float;
+            string input = text?.Trim();
+
+            return float.TryParse(input, styles, CultureInfo.CurrentCulture, out value)
+                || float.TryParse(input, styles, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static bool IsPictureShape(Shape shape)
+        {
+            if (shape == null) return false;
+
+            try
+            {
+                if (shape.Type == Office.MsoShapeType.msoPicture
+                    || shape.Type == Office.MsoShapeType.msoLinkedPicture)
+                {
+                    return true;
+                }
+
+                // Picture placeholders are represented as msoPlaceholder. Reading
+                // PictureFormat is the reliable way to retain support for them.
+                if (shape.Type == Office.MsoShapeType.msoPlaceholder)
+                {
+                    float cropLeft = shape.PictureFormat.CropLeft;
+                    return cropLeft >= 0;
+                }
+            }
+            catch { }
+
+            return false;
+        }
 
         private (float X, float Y) GetShapeAlignmentPoint(Shape shape, AlignmentPosition alignment)
         {
@@ -147,7 +202,18 @@ namespace SlideSCI
         private void Ribbon1_Load(object sender, RibbonUIEventArgs e)
         {
             app = Globals.ThisAddIn.Application;
+            app.WindowSelectionChange -= App_WindowSelectionChange;
             app.WindowSelectionChange += App_WindowSelectionChange;
+
+            if (settingsSaveTimer == null)
+            {
+                settingsSaveTimer = new Timer { Interval = 500 };
+                settingsSaveTimer.Tick += (s, args) =>
+                {
+                    settingsSaveTimer.Stop();
+                    PersistSettings();
+                };
+            }
 
             iniCombobox();
 
@@ -592,11 +658,36 @@ namespace SlideSCI
             // Properties.Settings.Default.ExportFormat = exportFormatComboBox.Text;
             // Properties.Settings.Default.ExportDPI = int.Parse(exportDpiEditBox.Text);
 
-            // Save all settings
-            Properties.Settings.Default.Save();
+            // TextChanged fires for every keystroke. Persist after a short quiet
+            // period so editing a value does not synchronously write to disk.
+            ScheduleSettingsSave();
 
             // 弹窗显示已保存
             // MessageBox.Show("设置已保存");
+        }
+
+        private void ScheduleSettingsSave()
+        {
+            if (settingsSaveTimer == null)
+            {
+                PersistSettings();
+                return;
+            }
+
+            settingsSaveTimer.Stop();
+            settingsSaveTimer.Start();
+        }
+
+        private void PersistSettings()
+        {
+            try
+            {
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"保存插件设置失败: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -620,25 +711,44 @@ namespace SlideSCI
     /// <param name="isBottomTitle">true为下标题，false为上标题</param>
     private void AddTitleFun(bool isBottomTitle = true)
     {
-        PowerPoint.Application app = Globals.ThisAddIn.Application;
-        Slide slide = app.ActiveWindow.View.Slide;
-        Selection sel = app.ActiveWindow.Selection;
+        if (!TryGetActiveSlide(out Slide slide))
+        {
+            MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!PowerPointContext.TryGetActiveSelection(app, out Selection sel))
+        {
+            MessageBox.Show("无法读取当前选择。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         bool autoGroup = autoGroupCheckBox.Checked; // 自动编组
         List<ShapeRange> allshapesName = new List<ShapeRange>(); // 需要编组的对象集合
         List<Shape> allshapes = new List<Shape>(); // 编组后的对象
 
         if (sel.Type == PpSelectionType.ppSelectionShapes)
         {
-            float fontSize = float.Parse(fontSizeEditBox.Text); // 字号
-            float distanceFromBottom = float.Parse(distanceFromBottomEditBox.Text); // 图下距离
+            if (!TryParseFloat(fontSizeEditBox.Text, out float fontSize) || fontSize <= 0)
+            {
+                MessageBox.Show("请输入有效的字体大小。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!TryParseFloat(distanceFromBottomEditBox.Text, out float distanceFromBottom))
+            {
+                MessageBox.Show("请输入有效的图片标题间距。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             string fontName = fontNameEditBox.Text; // 字体名称
             string titleText = titleTextEditBox.Text; // 标题文本
             int count = 1;
             float tolerance = 10f; // 通常图片排列错位容差，10就够用
-            ShapeRange sel2 = GetSortedSelection(sel, tolerance);
+            ShapeRange sortedSelection = GetSortedSelection(sel, tolerance);
             var selectedImgShape = new List<Shape>();
 
-            foreach (Shape shape in sel.ShapeRange)
+            foreach (Shape shape in (sortedSelection ?? sel.ShapeRange))
             {
                 selectedImgShape.Add(shape);
             }
@@ -740,7 +850,7 @@ namespace SlideSCI
                     allshapes.Add(GroupObj);
                     SelectMultipleShapes(allshapes);
                 }
-                catch (Exception ex)
+                catch
                 {
                     try
                     {
@@ -849,10 +959,27 @@ namespace SlideSCI
                 // 将选择集中的形状转换为 List<PowerPoint.Shape>
                 List<Shape> shapes = initialSelection.ShapeRange.Cast<Shape>().ToList();
 
-                // 根据 X 从小到大、Y 从大到小排序
-                var sortedShapes = shapes
-                    .OrderBy(shape => shape.Top + tolerance) // Y 坐标从小到大
-                    .ThenByDescending(shape => (shape.Left + tolerance) * -1) // X 坐标从大到小
+                // 先按行分组，再在每一行中按 X 坐标排序。
+                // 仅对 Top 做 OrderBy 会把同一行中有轻微偏差的对象拆散，
+                // 而原实现对 tolerance 的加法并没有真正产生容差效果。
+                var rows = new List<List<Shape>>();
+                foreach (Shape shape in shapes.OrderBy(shape => shape.Top).ThenBy(shape => shape.Left))
+                {
+                    List<Shape> matchingRow = rows
+                        .OrderBy(row => Math.Abs(row[0].Top - shape.Top))
+                        .FirstOrDefault(row => Math.Abs(row[0].Top - shape.Top) <= tolerance);
+
+                    if (matchingRow == null)
+                    {
+                        matchingRow = new List<Shape>();
+                        rows.Add(matchingRow);
+                    }
+                    matchingRow.Add(shape);
+                }
+
+                var sortedShapes = rows
+                    .OrderBy(row => row.Min(shape => shape.Top))
+                    .SelectMany(row => row.OrderBy(shape => shape.Left))
                     .ToList();
 
                 // 将排序后的形状转换为 ShapeRange
@@ -1308,7 +1435,7 @@ namespace SlideSCI
 
             // 移除 cm, CM, 厘米 等单位字符并清理空格
             string cleanText = Regex.Replace(text.Trim(), @"(?i)cm|厘米|\s", "");
-            if (float.TryParse(cleanText, out float cmValue) && cmValue > 0)
+            if (TryParseFloat(cleanText, out float cmValue) && cmValue > 0)
             {
                 points = (float)(cmValue * 28.3464593);
                 return true;
@@ -1319,63 +1446,98 @@ namespace SlideSCI
         /// <summary>
         /// 图片对齐排列
         /// </summary>
-        private void AlignPics()
+        private void AlignPics(bool showValidationErrors = true)
         {
-            Selection sel = app.ActiveWindow.Selection;
-            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            if (!TryGetActiveSlide(out Slide activeSlide))
             {
-                int colNum;
-                float colSpace;
-                float rowSpace;
-                float customWidth = 0;
-                float customHeight = 0;
+                if (showValidationErrors)
+                {
+                    MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                return;
+            }
 
-                // Input validation
-                if (!int.TryParse(imgAutoAlign_colNum.Text, out colNum) || colNum <= 0)
+            if (!PowerPointContext.TryGetActiveSelection(app, out Selection sel))
+            {
+                if (showValidationErrors)
+                {
+                    MessageBox.Show("无法读取当前选择。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                return;
+            }
+
+            if (sel == null || sel.Type != PpSelectionType.ppSelectionShapes || sel.ShapeRange.Count == 0)
+            {
+                if (showValidationErrors)
+                {
+                    MessageBox.Show("请选择要对齐的图片。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                return;
+            }
+
+            int colNum;
+            float colSpace;
+            float rowSpace;
+            float customWidth = 0;
+            float customHeight = 0;
+
+            // Input validation
+            if (!int.TryParse(imgAutoAlign_colNum.Text, out colNum) || colNum <= 0)
+            {
+                if (showValidationErrors)
                 {
                     MessageBox.Show("请输入有效的列数量。");
-                    return;
                 }
+                return;
+            }
 
-                if (!float.TryParse(imgAutoAlign_colSpace.Text, out colSpace) || colSpace < 0)
+            if (!TryParseFloat(imgAutoAlign_colSpace.Text, out colSpace) || colSpace < 0)
+            {
+                if (showValidationErrors)
                 {
                     MessageBox.Show("请输入有效的列间距。");
-                    return;
                 }
+                return;
+            }
 
+            string rowSpaceText = imgAutoAlign_rowSpace.Text ?? string.Empty;
+            string rowSpaceNumber = rowSpaceText.Split(new char[] { '(', ' ', '≈' })[0];
+            if (!TryParseFloat(rowSpaceNumber, out rowSpace) || rowSpace < 0)
+            {
+                rowSpace = colSpace;
+            }
+
+            bool useCustomWidth = TryParseCmToPoints(imgWidthEditBpx.Text, out customWidth);
+            bool useCustomHeight = TryParseCmToPoints(imgHeightEditBox.Text, out customHeight);
+            var selectedImgShape = new List<Shape>();
+            foreach (Shape shape in sel.ShapeRange)
+            {
+                // Skip text boxes if excludeTextcheckBox is checked
+                Office.MsoShapeType objType = shape.Type;
                 if (
-                    !float.TryParse(
-                        imgAutoAlign_rowSpace.Text.Split(new char[] { '(', ' ' })[0],
-                        out rowSpace
+                    excludeTextcheckBox.Checked
+                    && (
+                        objType is Office.MsoShapeType.msoTextBox
+                        || objType is Office.MsoShapeType.msoAutoShape
+                        || objType is Office.MsoShapeType.msoMedia
                     )
-                    || rowSpace < 0
                 )
                 {
-                    rowSpace = colSpace;
+                    continue;
                 }
+                selectedImgShape.Add(shape);
+            }
 
-                bool useCustomWidth = TryParseCmToPoints(imgWidthEditBpx.Text, out customWidth);
-                bool useCustomHeight = TryParseCmToPoints(imgHeightEditBox.Text, out customHeight);
-                var selectedImgShape = new List<Shape>();
-                foreach (Shape shape in sel.ShapeRange)
+            if (selectedImgShape.Count == 0)
+            {
+                if (showValidationErrors)
                 {
-                    // Skip text boxes if excludeTextcheckBox is checked
-                    Office.MsoShapeType objType = shape.Type;
-                    if (
-                        excludeTextcheckBox.Checked
-                        && (
-                            objType is Office.MsoShapeType.msoTextBox
-                            || objType is Office.MsoShapeType.msoAutoShape
-                            || objType is Office.MsoShapeType.msoMedia
-                        )
-                    )
-                    {
-                        continue;
-                    }
-                    selectedImgShape.Add(shape);
+                    MessageBox.Show("当前选择中没有可排列的图片对象。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
+                return;
+            }
 
-                List<Shape> shapesToArrange = new List<Shape>();
+            List<Shape> shapesToArrange = new List<Shape>();
 
                 if (imgAutoAlignSortTypeDropDown.SelectedItemIndex == 0)
                 {
@@ -1432,6 +1594,16 @@ namespace SlideSCI
                         shapesToArrange.Add(shape);
                     }
                 }
+
+                if (shapesToArrange.Count == 0)
+                {
+                    if (showValidationErrors)
+                    {
+                        MessageBox.Show("当前选择中没有可排列的图片对象。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    return;
+                }
+
                 // Now Align image
                 float startX = shapesToArrange[0].Left;
                 float startY = shapesToArrange[0].Top;
@@ -1532,7 +1704,6 @@ namespace SlideSCI
                         referenceHeight = 0;
                     }
                     float currentX = startX;
-                    float rowMaxHeight = 0;
                     int colCount = 0;
 
                     foreach (var shape in shapesToArrange)
@@ -1582,7 +1753,8 @@ namespace SlideSCI
                         currentX += shape.Width + colSpace;
                         colCount++;
 
-                        // Calculate the maximum height in the current row
+                        // For a custom width with preserved aspect ratios, the
+                        // next row must start below the tallest shape in this row.
                         if (useCustomWidth && !useCustomHeight)
                         {
                             referenceHeight = Math.Max(referenceHeight, shape.Height);
@@ -1632,11 +1804,6 @@ namespace SlideSCI
                         columnTops[minColumn] += shape.Height + rowSpace;
                     }
                 }
-            }
-            else
-            {
-                MessageBox.Show("请选择要对齐的图片。");
-            }
         }
 
         private void gallery1_Click(object sender, RibbonControlEventArgs e) { }
@@ -1948,7 +2115,13 @@ namespace SlideSCI
                         float left = (slide.Master.Width - 500) / 2; // Center horizontally
                         float width = 500;
 
-                        List<Shape> insertedShapes = RenderMarkdownToShapes(markdown, slide, left, currentTop, width);
+                        bool renderHadErrors;
+                        List<Shape> insertedShapes = RenderMarkdownToShapes(markdown, slide, left, currentTop, width, out renderHadErrors);
+
+                        if (renderHadErrors)
+                        {
+                            MessageBox.Show("部分 Markdown 内容未能插入，已保留成功生成的内容。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
 
                         if (insertedShapes.Count > 1)
                         {
@@ -2075,10 +2248,29 @@ namespace SlideSCI
                     float width = originalShape.Width;
 
                     // Render markdown content to rich text shapes at the same position/width
-                    List<Shape> insertedShapes = RenderMarkdownToShapes(markdown, slide, left, top, width);
+                        bool renderHadErrors;
+                        List<Shape> insertedShapes = RenderMarkdownToShapes(markdown, slide, left, top, width, out renderHadErrors);
 
-                    // Delete the original shape
-                    originalShape.Delete();
+                        // Keep the original shape intact if rendering failed or produced nothing.
+                        // This makes the conversion operation recoverable instead of turning a
+                        // clipboard/COM failure into data loss.
+                        if (renderHadErrors || insertedShapes.Count == 0)
+                        {
+                            foreach (Shape insertedShape in insertedShapes)
+                            {
+                                try
+                                {
+                                    insertedShape.Delete();
+                                }
+                                catch { }
+                            }
+
+                            MessageBox.Show("Markdown 转换未完成，原文本框已保留。", "转换失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            continue;
+                        }
+
+                        // Delete the original shape only after the complete replacement succeeded.
+                        originalShape.Delete();
 
                     // Group them if multiple shapes were created
                     if (insertedShapes.Count > 1)
@@ -2122,11 +2314,12 @@ namespace SlideSCI
             }
         }
 
-        private List<Shape> RenderMarkdownToShapes(string markdown, Slide slide, float left, float top, float width)
+        private List<Shape> RenderMarkdownToShapes(string markdown, Slide slide, float left, float top, float width, out bool hadErrors)
         {
             var segments = SplitMarkdownIntoSegments(markdown);
             var insertedShapes = new List<Shape>();
             float currentTop = top;
+            hadErrors = false;
 
             foreach (var segment in segments)
             {
@@ -2250,9 +2443,14 @@ namespace SlideSCI
                         insertedShapes.Add(shape);
                         currentTop += shape.Height + 10;
                     }
+                    else
+                    {
+                        hadErrors = true;
+                    }
                 }
                 catch (Exception ex)
                 {
+                    hadErrors = true;
                     MessageBox.Show($"处理段落时出错: {ex.Message}");
                     continue; // Continue with next segment
                 }
@@ -2687,7 +2885,12 @@ namespace SlideSCI
                 return tableShape[1];
             }
 
-            return textBox;
+            try
+            {
+                textBox.Delete();
+            }
+            catch { }
+            return null;
         }
 
         private Shape InsertMathBlock(string mathContent, float left, float top, float width = 500)
@@ -2781,7 +2984,12 @@ namespace SlideSCI
                 return shape;
             }
 
-            return textBox;
+            try
+            {
+                textBox.Delete();
+            }
+            catch { }
+            return null;
         }
 
         private string ProcessMarkdown(string markdown, float width = 500)
@@ -2932,6 +3140,11 @@ namespace SlideSCI
             if (sel.Type == PpSelectionType.ppSelectionShapes)
             {
                 Shape shape = sel.ShapeRange[1];
+                if (!IsPictureShape(shape))
+                {
+                    MessageBox.Show("请选择一个图片对象。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
 
                 // 保存裁剪设置
                 cropLeft = shape.PictureFormat.CropLeft;
@@ -2963,10 +3176,16 @@ namespace SlideSCI
             Selection sel = app.ActiveWindow.Selection;
             if (sel.Type == PpSelectionType.ppSelectionShapes)
             {
+                int appliedCount = 0;
                 foreach (Shape shape in sel.ShapeRange)
                 {
                     try
                     {
+                        if (!IsPictureShape(shape))
+                        {
+                            continue;
+                        }
+
                         // Store original position
                         float originalLeft = shape.Left;
                         float originalTop = shape.Top;
@@ -2991,11 +3210,17 @@ namespace SlideSCI
                         // Restore original position
                         shape.Left = originalLeft;
                         shape.Top = originalTop;
+                        appliedCount++;
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show($"应用裁剪设置时出错: {ex.Message}");
                     }
+                }
+
+                if (appliedCount == 0)
+                {
+                    MessageBox.Show("当前选择中没有可应用裁剪设置的图片。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             else
@@ -3006,7 +3231,7 @@ namespace SlideSCI
 
         private void openGithub_Click(object sender, RibbonControlEventArgs e)
         {
-            System.Diagnostics.Process.Start("https://github.com/Achuan-2/my_ppt_plugin/");
+            System.Diagnostics.Process.Start("https://github.com/Achuan-2/SlideSCI/");
         }
 
         private void openDoc_Click(object sender, RibbonControlEventArgs e)
@@ -4259,6 +4484,20 @@ namespace SlideSCI
             }
         }
 
+        private void DeleteShapeRange(ShapeRange shapeRange)
+        {
+            if (shapeRange == null) return;
+
+            for (int i = shapeRange.Count; i >= 1; i--)
+            {
+                try
+                {
+                    shapeRange[i].Delete();
+                }
+                catch { }
+            }
+        }
+
         private List<Shape> GetTargetShapesFromSelection(Selection sel)
         {
             List<Shape> targetShapes = new List<Shape>();
@@ -4347,19 +4586,25 @@ namespace SlideSCI
                     .ThenBy(t => t.Left)
                     .ToList();
 
-                // 3. 删除原目标选择 (在此删除，因为下面 Paste 会改变 Selection)
-                foreach (Shape shape in targetShapes)
+                // 3. 先粘贴并完成内容替换。不要在 Paste 之前删除原对象，
+                // 否则剪贴板/COM 失败会把用户原内容直接变成不可恢复的丢失。
+                PowerPoint.Slide slide = null;
+                try
                 {
-                    try
-                    {
-                        shape.Delete();
-                    }
-                    catch { }
+                    slide = app.ActiveWindow.View.Slide;
+                }
+                catch { }
+
+                if (slide == null)
+                {
+                    throw new InvalidOperationException("无法获取当前幻灯片，未修改目标对象。");
                 }
 
-                // 4. 粘贴已复制的格式组/形状到当前幻灯片
-                PowerPoint.Slide slide = app.ActiveWindow.View.Slide;
                 ShapeRange pastedRange = slide.Shapes.Paste();
+                if (pastedRange == null || pastedRange.Count == 0)
+                {
+                    throw new InvalidOperationException("粘贴格式失败，未修改目标对象。");
+                }
 
                 // 5. 将粘贴的组/形状移动到目标位置
                 try
@@ -4421,6 +4666,16 @@ namespace SlideSCI
                 }
 
                 int count = Math.Min(textPieces.Count, pastedTextShapes.Count);
+                if (textPieces.Count > pastedTextShapes.Count)
+                {
+                    // Never discard target text when the copied group does not
+                    // contain enough text-bearing shapes to receive it.
+                    DeleteShapeRange(pastedRange);
+                    MessageBox.Show("复制的组格式没有足够的文本框承载目标内容，原目标对象已保留。", "粘贴失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                bool replacementSucceeded = true;
                 for (int i = 0; i < count; i++)
                 {
                     try
@@ -4429,11 +4684,31 @@ namespace SlideSCI
                     }
                     catch (Exception ex)
                     {
+                        replacementSucceeded = false;
                         System.Diagnostics.Debug.WriteLine($"设置文本出错: {ex.Message}");
                     }
                 }
 
-                // 8. 选中新粘贴的图形
+                if (!replacementSucceeded)
+                {
+                    // 回滚新粘贴的对象，保留原目标对象。
+                    DeleteShapeRange(pastedRange);
+
+                    MessageBox.Show("组格式中的文字替换失败，原目标对象已保留。", "粘贴失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 4. 只有完整粘贴成功后才删除原目标选择。
+                foreach (Shape shape in targetShapes)
+                {
+                    try
+                    {
+                        shape.Delete();
+                    }
+                    catch { }
+                }
+
+                // 5. 选中新粘贴的图形
                 try
                 {
                     pastedRange.Select();
@@ -4530,32 +4805,38 @@ namespace SlideSCI
 
         private void imgAutoAlign_rowSpace_TextChanged(object sender, RibbonControlEventArgs e)
         {
-            string str1 = imgAutoAlign_rowSpace.Text.Split(new char[] { '≈' })[1];
-            if (str1 != null)
+            string rowSpaceText = imgAutoAlign_rowSpace.Text ?? string.Empty;
+            int approxIndex = rowSpaceText.IndexOf('≈');
+            if (approxIndex >= 0 && approxIndex + 1 < rowSpaceText.Length)
             {
-                fontSizeEditBox.Text = Regex.Replace(str1, @"[^\d.\d]", "");
+                string approxText = rowSpaceText.Substring(approxIndex + 1);
+                Match fontSizeMatch = Regex.Match(approxText, @"[-+]?\d+(?:[.,]\d+)?");
+                if (fontSizeMatch.Success)
+                {
+                    fontSizeEditBox.Text = fontSizeMatch.Value.Replace(',', '.');
+                }
             }
-            AlignPics();
+            AlignPics(showValidationErrors: false);
         }
 
         private void imgAutoAlign_colNum_TextChanged(object sender, RibbonControlEventArgs e)
         {
-            AlignPics();
+            AlignPics(showValidationErrors: false);
         }
 
         private void imgAutoAlign_colSpace_TextChanged(object sender, RibbonControlEventArgs e)
         {
-            AlignPics();
+            AlignPics(showValidationErrors: false);
         }
 
         private void imgWidthEditBpx_TextChanged(object sender, RibbonControlEventArgs e)
         {
-            AlignPics();
+            AlignPics(showValidationErrors: false);
         }
 
         private void imgHeightEditBox_TextChanged(object sender, RibbonControlEventArgs e)
         {
-            AlignPics();
+            AlignPics(showValidationErrors: false);
         }
 
         private void excludeTextcheckBox_Click(object sender, RibbonControlEventArgs e) { }
@@ -4602,8 +4883,11 @@ namespace SlideSCI
 
                 var shape = shapeRange[1];
 
-                // 检查选中的是否是图片类型
-
+                if (!IsPictureShape(shape))
+                {
+                    MessageBox.Show("所选对象不是图片，请重新选择。", "操作提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
 
                 // 2. 获取必要信息：Shape ID, Slide Object 和演示文稿路径
                 uint shapeId = (uint)shape.Id;
@@ -5431,39 +5715,23 @@ namespace SlideSCI
             string filePath
         )
         {
-            presentation.ExportAsFixedFormat(
-                Path: filePath,
-                FixedFormatType: PpFixedFormatType.ppFixedFormatTypePDF,
-                Intent: PpFixedFormatIntent.ppFixedFormatIntentPrint,
-                PrintRange: presentation.PrintOptions.Ranges.Add(slideIndex, slideIndex) // Export specific slide
-            );
-            // Clean up the added print range to avoid issues with subsequent exports
-            if (presentation.PrintOptions.Ranges.Count > 0)
+            PowerPoint.PrintRange printRange = null;
+            try
             {
-                // PowerPoint's PrintOptions.Ranges collection is 1-based.
-                // And it seems it might accumulate ranges if not cleared.
-                // A robust way is to clear all ranges after use if they are not meant to be persistent.
-                // However, directly clearing all might affect other print settings if the user configured them.
-                // For this specific export, we add a range, use it, and ideally, it should be self-contained.
-                // If issues arise, clearing might be needed:
-                // while (presentation.PrintOptions.Ranges.Count > 0) {
-                //     presentation.PrintOptions.Ranges[1].Delete();
-                // }
-                // For now, assume PowerPoint handles the temporary range correctly for ExportAsFixedFormat.
-                // If exporting multiple single-slide PDFs in a loop, ensure ranges are managed.
-                // A safer approach for single slide export is to select it and use ppPrintSelection.
-                // However, the PrintRange approach is more direct if it works reliably across versions.
-
-                // Let's try selecting the slide and using ppPrintSelection for single slide PDF export
-                // This is generally more reliable.
-                presentation.Slides.Range(new int[] { slideIndex }).Select();
                 presentation.ExportAsFixedFormat(
                     Path: filePath,
                     FixedFormatType: PpFixedFormatType.ppFixedFormatTypePDF,
                     Intent: PpFixedFormatIntent.ppFixedFormatIntentPrint,
-                    OutputType: PpPrintOutputType.ppPrintOutputSlides,
-                    RangeType: PpPrintRangeType.ppPrintSelection
+                    PrintRange: (printRange = presentation.PrintOptions.Ranges.Add(slideIndex, slideIndex))
                 );
+            }
+            finally
+            {
+                if (printRange != null)
+                {
+                    try { printRange.Delete(); } catch { }
+                    PowerPointContext.Release(printRange);
+                }
             }
         }
 
@@ -5496,11 +5764,11 @@ namespace SlideSCI
 
                 selectedShape = sel.ShapeRange[1];
 
-                // if (selectedShape.Type != Office.MsoShapeType.msoPicture && selectedShape.Type != Office.MsoShapeType.msoLinkedPicture)
-                // {
-                //     MessageBox.Show("所选对象不是图片，请重新选择。", "操作提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                //     return;
-                // }
+                if (!IsPictureShape(selectedShape))
+                {
+                    MessageBox.Show("所选对象不是图片，请重新选择。", "操作提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
 
                 // 2. 保存图片的原始状态（尺寸、位置和锁定设置）
                 float originalWidth = selectedShape.Width;

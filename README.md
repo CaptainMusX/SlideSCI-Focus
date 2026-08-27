@@ -125,7 +125,7 @@ Github地址：[https://github.com/Achuan-2/SlideSCI](https://github.com/Achuan-
   > 配置「插入LaTeX svg」功能的方法
   >
   > - 配置[Node.js](https://nodejs.org/zh-cn/)环境
-  > - 进入插件安装文件夹的`latex-converter`文件夹，默认为`%APPDATA%\Achuan-2\SlideSCI\latex-converter`
+  > - 进入插件安装文件夹的`latex-converter`文件夹
   > - 打开命令行，运行`npm install`安装环境
   > - 配置完成，可以使用「插入LaTeX svg」功能
 
@@ -172,7 +172,7 @@ Github地址：[https://github.com/Achuan-2/SlideSCI](https://github.com/Achuan-
 
 ## 🖥️ 安装方法
 
-下载本插件Github页面[Release](https://github.com/Achuan-2/my_ppt_plugin/releases)中的exe文件，双击安装即可
+下载本插件 Github 页面 [Release](https://github.com/Achuan-2/SlideSCI/releases) 中的 exe 文件，双击安装即可
 
 注意：安装时需要先退出PPT，否则PPT不会即时加载该插件
 

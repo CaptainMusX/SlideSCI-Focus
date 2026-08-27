@@ -255,11 +255,21 @@ namespace SlideSCI
             RefreshSelection();
         }
 
+        private void ClearSnapshots()
+        {
+            foreach (ShapeSnapshot snapshot in snapshotShapes)
+            {
+                PowerPointContext.Release(snapshot.ActualShape);
+                snapshot.ActualShape = null;
+            }
+            snapshotShapes.Clear();
+        }
+
         public void RefreshSelection()
         {
             if (isApplying) return;
 
-            snapshotShapes.Clear();
+            ClearSnapshots();
             try
             {
                 PowerPoint.Selection sel = app.ActiveWindow.Selection;
@@ -353,6 +363,15 @@ namespace SlideSCI
                 lblInfo.Text = $"加载选区失败：{ex.Message}";
                 SetControlsEnabled(false);
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ClearSnapshots();
+            }
+            base.Dispose(disposing);
         }
 
         private void SetControlsEnabled(bool enabled)

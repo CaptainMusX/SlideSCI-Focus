@@ -40,6 +40,66 @@ namespace SlideSCI
             LoadLibraryItems();
         }
 
+        private string GetLibraryRootPath()
+        {
+            return Path.GetFullPath(libraryDir)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+        }
+
+        private bool IsPathInsideLibrary(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+
+            string fullPath = Path.GetFullPath(path);
+            string rootPath = GetLibraryRootPath();
+            string rootWithoutSeparator = rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return fullPath.Equals(rootWithoutSeparator, StringComparison.OrdinalIgnoreCase)
+                || fullPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void MoveAssetPair(string sourcePptx, string sourcePng, string destinationPptx, string destinationPng)
+        {
+            if (!IsPathInsideLibrary(sourcePptx) || !IsPathInsideLibrary(sourcePng)
+                || !IsPathInsideLibrary(destinationPptx) || !IsPathInsideLibrary(destinationPng))
+            {
+                throw new InvalidOperationException("素材路径必须位于素材库目录内。");
+            }
+
+            if (string.Equals(sourcePptx, destinationPptx, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(sourcePng, destinationPng, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!File.Exists(sourcePptx) || !File.Exists(sourcePng))
+            {
+                throw new FileNotFoundException("素材文件不完整，无法移动。");
+            }
+
+            if (File.Exists(destinationPptx) || File.Exists(destinationPng))
+            {
+                throw new IOException("目标位置已存在同名素材。");
+            }
+
+            bool pptxMoved = false;
+            try
+            {
+                File.Move(sourcePptx, destinationPptx);
+                pptxMoved = true;
+                File.Move(sourcePng, destinationPng);
+            }
+            catch
+            {
+                // Keep the pair consistent if the second move fails.
+                if (pptxMoved && File.Exists(destinationPptx) && !File.Exists(sourcePptx))
+                {
+                    try { File.Move(destinationPptx, sourcePptx); } catch { }
+                }
+                throw;
+            }
+        }
+
         private void InitializeLibraryDir()
         {
             libraryDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SlideSCI", "ShapeLibrary");
@@ -686,7 +746,7 @@ namespace SlideSCI
             if (selection == null || selection.Type != PowerPoint.PpSelectionType.ppSelectionShapes || selection.ShapeRange.Count == 0)
             {
                 MessageBox.Show("请先在幻灯片中选择要保存的形状（可框选多个形状组合）。", "操作提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                if (selection != null) Marshal.ReleaseComObject(selection);
+                PowerPointContext.Release(selection);
                 return;
             }
 
@@ -700,7 +760,7 @@ namespace SlideSCI
                 }
             }
 
-            Marshal.ReleaseComObject(selection);
+            PowerPointContext.Release(selection);
         }
 
         private void BtnImport_Click(object sender, EventArgs e)
@@ -717,8 +777,13 @@ namespace SlideSCI
                     {
                         using (ZipArchive archive = ZipFile.OpenRead(openFileDialog.FileName))
                         {
+                            string libraryRootPath = GetLibraryRootPath();
                             bool? overwriteAll = null; // null = ask, true = overwrite, false = skip
                             int importCount = 0;
+                            const int maxMaterialEntries = 10000;
+                            const long maxUncompressedBytes = 512L * 1024L * 1024L;
+                            int materialEntryCount = 0;
+                            long uncompressedBytes = 0;
 
                             // First, validate zip structure to make sure it contains expected files
                             bool hasValidEntries = false;
@@ -729,6 +794,27 @@ namespace SlideSCI
                                 {
                                     hasValidEntries = true;
                                     break;
+                                }
+                            }
+
+                            // Recalculate the complete budget after checking that at
+                            // least one material entry exists.
+                            if (hasValidEntries)
+                            {
+                                materialEntryCount = 0;
+                                uncompressedBytes = 0;
+                                foreach (ZipArchiveEntry entry in archive.Entries)
+                                {
+                                    string ext = Path.GetExtension(entry.FullName).ToLower();
+                                    if (ext != ".pptx" && ext != ".png") continue;
+
+                                    materialEntryCount++;
+                                    if (materialEntryCount > maxMaterialEntries || entry.Length > maxUncompressedBytes - uncompressedBytes)
+                                    {
+                                        MessageBox.Show("导入素材数量或解压后大小超过安全限制，已中止导入。", "导入失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                        return;
+                                    }
+                                    uncompressedBytes += entry.Length;
                                 }
                             }
 
@@ -743,12 +829,14 @@ namespace SlideSCI
                                 string ext = Path.GetExtension(entry.FullName).ToLower();
                                 if (ext != ".pptx" && ext != ".png") continue;
 
-                                // Resolve target path preserving subdirectory structure
+                                // Resolve target path preserving subdirectory structure.
+                                // The trailing separator is important: a simple StartsWith(libraryDir)
+                                // would also accept a sibling such as ShapeLibrary_backup.
                                 string entryPath = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
                                 string targetPath = Path.GetFullPath(Path.Combine(libraryDir, entryPath));
 
-                                // Prevent zip slip: check if targetPath starts with libraryDir
-                                if (!targetPath.StartsWith(libraryDir, StringComparison.OrdinalIgnoreCase))
+                                // Prevent zip slip using a canonical directory-boundary check.
+                                if (!targetPath.StartsWith(libraryRootPath, StringComparison.OrdinalIgnoreCase))
                                 {
                                     continue; // Skip unsafe paths
                                 }
@@ -827,6 +915,12 @@ namespace SlideSCI
                 {
                     try
                     {
+                        if (IsPathInsideLibrary(saveFileDialog.FileName))
+                        {
+                            MessageBox.Show("请将导出的 ZIP 文件保存到素材库目录之外，避免把压缩包打包进自身。", "导出失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+
                         if (File.Exists(saveFileDialog.FileName))
                         {
                             File.Delete(saveFileDialog.FileName);
@@ -857,6 +951,8 @@ namespace SlideSCI
         {
             PowerPoint.Application app = Globals.ThisAddIn.Application;
             PowerPoint.Presentation tempPres = null;
+            PowerPoint.Slide tempSlide = null;
+            PowerPoint.ShapeRange pastedRange = null;
             string pptxPath = Path.Combine(targetFolder, assetName + ".pptx");
             string pngPath = Path.Combine(targetFolder, assetName + ".png");
 
@@ -870,7 +966,7 @@ namespace SlideSCI
                 tempPres.PageSetup.SlideWidth = app.ActivePresentation.PageSetup.SlideWidth;
                 tempPres.PageSetup.SlideHeight = app.ActivePresentation.PageSetup.SlideHeight;
 
-                PowerPoint.Slide tempSlide = tempPres.Slides.Add(1, PowerPoint.PpSlideLayout.ppLayoutBlank);
+                tempSlide = tempPres.Slides.Add(1, PowerPoint.PpSlideLayout.ppLayoutBlank);
 
                 // Copy selection shapes to clipboard and paste to temporary slide
                 int retries = 3;
@@ -893,7 +989,11 @@ namespace SlideSCI
 
                 if (copySuccess)
                 {
-                    tempSlide.Shapes.Paste();
+                    pastedRange = tempSlide.Shapes.Paste();
+                    if (pastedRange == null || pastedRange.Count == 0)
+                    {
+                        throw new InvalidOperationException("无法将所选形状复制到素材文件。");
+                    }
                     tempPres.SaveAs(pptxPath);
                 }
 
@@ -913,10 +1013,12 @@ namespace SlideSCI
             }
             finally
             {
+                PowerPointContext.Release(pastedRange);
+                PowerPointContext.Release(tempSlide);
                 if (tempPres != null)
                 {
                     try { tempPres.Close(); } catch { }
-                    Marshal.ReleaseComObject(tempPres);
+                    PowerPointContext.Release(tempPres);
                 }
             }
         }
@@ -944,7 +1046,7 @@ namespace SlideSCI
             if (selection == null || selection.Type != PowerPoint.PpSelectionType.ppSelectionShapes || selection.ShapeRange.Count == 0)
             {
                 MessageBox.Show("请先在幻灯片中选择要更新的形状（可框选多个形状组合）。", "操作提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                if (selection != null) Marshal.ReleaseComObject(selection);
+                PowerPointContext.Release(selection);
                 return;
             }
 
@@ -955,7 +1057,7 @@ namespace SlideSCI
                 SaveSelectedShapes(selection.ShapeRange, card.AssetName, Path.GetDirectoryName(card.PptxPath));
             }
 
-            Marshal.ReleaseComObject(selection);
+            PowerPointContext.Release(selection);
         }
 
         public void InsertAsset(string pptxPath)
@@ -986,6 +1088,9 @@ namespace SlideSCI
             }
 
             PowerPoint.Presentation tempPres = null;
+            PowerPoint.Slide tempSlide = null;
+            PowerPoint.ShapeRange shapesToCopy = null;
+            PowerPoint.ShapeRange pastedRange = null;
 
             // 1. Backup user's clipboard to prevent pollution
             System.Windows.Forms.IDataObject clipboardBackup = null;
@@ -1009,10 +1114,10 @@ namespace SlideSCI
 
                 if (tempPres.Slides.Count > 0)
                 {
-                    PowerPoint.Slide tempSlide = tempPres.Slides[1];
+                    tempSlide = tempPres.Slides[1];
                     if (tempSlide.Shapes.Count > 0)
                     {
-                        PowerPoint.ShapeRange shapesToCopy = tempSlide.Shapes.Range();
+                        shapesToCopy = tempSlide.Shapes.Range();
 
                         // Clear clipboard before copy to avoid pasting stale content if copy fails
                         try { System.Windows.Forms.Clipboard.Clear(); } catch { }
@@ -1044,7 +1149,6 @@ namespace SlideSCI
                         if (copySuccess)
                         {
                             // Paste onto the active slide
-                            PowerPoint.ShapeRange pastedRange = null;
                             int pasteRetries = 15;
                             while (pasteRetries > 0)
                             {
@@ -1136,7 +1240,12 @@ namespace SlideSCI
             }
             finally
             {
-                // 3. Clean up the temporary hidden presentation
+                // 3. Release child COM references before closing the temporary presentation.
+                PowerPointContext.Release(pastedRange);
+                PowerPointContext.Release(shapesToCopy);
+                PowerPointContext.Release(tempSlide);
+
+                // 4. Clean up the temporary hidden presentation
                 if (tempPres != null)
                 {
                     try
@@ -1144,27 +1253,30 @@ namespace SlideSCI
                         tempPres.Close();
                     }
                     catch { }
-                    Marshal.ReleaseComObject(tempPres);
+                    PowerPointContext.Release(tempPres);
                 }
 
-                // 4. Restore original slide selection to make sure focus is correct
+                // 5. Restore original slide selection to make sure focus is correct
                 try
                 {
                     activeSlide.Select();
                 }
                 catch { }
 
-                // 5. Restore user's clipboard so it is not polluted
+                // 6. Restore user's clipboard so it is not polluted
                 if (clipboardBackup != null)
                 {
                     try
                     {
                         System.Windows.Forms.Clipboard.SetDataObject(clipboardBackup, true);
                     }
-                    catch { }
+                        catch { }
+                    }
                 }
+
+                PowerPointContext.Release(activeSlide);
+                PowerPointContext.Release(activePres);
             }
-        }
 
         // Context Menu Handlers
         private object GetSelectedCardOrFolder()
@@ -1317,19 +1429,22 @@ namespace SlideSCI
             }
         }
 
-        private void MoveTargetTo(object target, string destDir)
+        internal void MoveTargetTo(object target, string destDir)
         {
             try
             {
+                if (!IsPathInsideLibrary(destDir))
+                {
+                    throw new InvalidOperationException("目标文件夹必须位于素材库目录内。");
+                }
+
                 if (target is LibraryCard card)
                 {
                     string destPptx = Path.Combine(destDir, Path.GetFileName(card.PptxPath));
                     string destPng = Path.Combine(destDir, Path.GetFileName(card.PngPath));
 
                     card.DisposeCard(); // Release locks
-
-                    if (File.Exists(card.PptxPath)) File.Move(card.PptxPath, destPptx);
-                    if (File.Exists(card.PngPath)) File.Move(card.PngPath, destPng);
+                    MoveAssetPair(card.PptxPath, card.PngPath, destPptx, destPng);
                 }
                 else if (target is FolderCard fCard)
                 {
@@ -1354,14 +1469,18 @@ namespace SlideSCI
                 if (dlg.ShowDialog() == DialogResult.OK)
                 {
                     string newName = dlg.InputText;
+                    if (string.Equals(newName, card.AssetName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return;
+                    }
+
                     string newPptxPath = Path.Combine(parentDir, newName + ".pptx");
                     string newPngPath = Path.Combine(parentDir, newName + ".png");
 
                     try
                     {
                         card.DisposeCard();
-                        File.Move(card.PptxPath, newPptxPath);
-                        File.Move(card.PngPath, newPngPath);
+                        MoveAssetPair(card.PptxPath, card.PngPath, newPptxPath, newPngPath);
                         LoadLibraryItems();
                     }
                     catch (Exception ex)
@@ -1530,6 +1649,32 @@ namespace SlideSCI
                 currentDir = path;
                 LoadLibraryItems();
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (flowLayout != null)
+                {
+                    foreach (Control ctrl in flowLayout.Controls)
+                    {
+                        if (ctrl is LibraryCard card)
+                        {
+                            card.DisposeCard();
+                        }
+                        else if (ctrl is FolderCard folder)
+                        {
+                            folder.Dispose();
+                        }
+                    }
+                    flowLayout.Controls.Clear();
+                }
+
+                try { contextMenu?.Dispose(); } catch { }
+            }
+
+            base.Dispose(disposing);
         }
 
         private void BtnNewFolder_Click(object sender, EventArgs e)
@@ -1803,16 +1948,21 @@ namespace SlideSCI
         {
             if (e.Button == MouseButtons.Left)
             {
+                // A double-click raises MouseClick twice. Debounce it because
+                // both MouseClick and MouseDoubleClick are wired to the card.
+                if ((DateTime.UtcNow - lastInsertAtUtc).TotalMilliseconds < 350)
+                {
+                    return;
+                }
+
+                lastInsertAtUtc = DateTime.UtcNow;
                 parentContainer.InsertAsset(PptxPath);
             }
         }
 
         private void Card_MouseDoubleClick(object sender, MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left)
-            {
-                parentContainer.InsertAsset(PptxPath);
-            }
+            // The first MouseClick already performs the insertion.
         }
 
         private void Card_MouseUp(object sender, MouseEventArgs e)
@@ -1824,6 +1974,7 @@ namespace SlideSCI
         }
 
         private Point dragStartPoint;
+        private DateTime lastInsertAtUtc = DateTime.MinValue;
 
         private void Card_MouseDown(object sender, MouseEventArgs e)
         {
@@ -2194,14 +2345,9 @@ namespace SlideSCI
                 LibraryCard card = (LibraryCard)e.Data.GetData(typeof(LibraryCard));
                 if (card != null)
                 {
-                    string destPptx = Path.Combine(this.FolderPath, Path.GetFileName(card.PptxPath));
-                    string destPng = Path.Combine(this.FolderPath, Path.GetFileName(card.PngPath));
                     try
                     {
-                        card.DisposeCard();
-                        if (File.Exists(card.PptxPath)) File.Move(card.PptxPath, destPptx);
-                        if (File.Exists(card.PngPath)) File.Move(card.PngPath, destPng);
-                        parentContainer.LoadLibraryItems();
+                        parentContainer.MoveTargetTo(card, this.FolderPath);
                     }
                     catch (Exception ex)
                     {

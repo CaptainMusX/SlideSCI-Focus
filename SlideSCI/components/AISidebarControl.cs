@@ -4,6 +4,8 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -28,7 +30,7 @@ namespace SlideSCI
         private string configPath;
         private AIConfig currentConfig;
         private List<ChatMessage> conversationHistory = new List<ChatMessage>();
-        private static readonly HttpClient httpClient = new HttpClient();
+        private static readonly HttpClient httpClient = CreateHttpClient();
         private bool isGenerating = false;
         private CancellationTokenSource cts;
 
@@ -36,13 +38,10 @@ namespace SlideSCI
 
         public AISidebarControl()
         {
-            // Enable TLS 1.2 and TLS 1.3 for secure API calls
+            // Require modern TLS for API calls. TLS 1.1 is intentionally not enabled.
             try
             {
-                System.Net.ServicePointManager.SecurityProtocol |= 
-                    System.Net.SecurityProtocolType.Tls12 | 
-                    System.Net.SecurityProtocolType.Tls11 |
-                    (System.Net.SecurityProtocolType)12288; // TLS 1.3
+                System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
             }
             catch { }
 
@@ -50,6 +49,37 @@ namespace SlideSCI
             LoadConfig();
             InitializeComponent();
             InitializeSystemMessage();
+        }
+
+        private static HttpClient CreateHttpClient()
+        {
+            var client = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(60)
+            };
+            return client;
+        }
+
+        private static Uri CreateApiEndpoint(string apiUrl)
+        {
+            string endpointText = (apiUrl ?? string.Empty).TrimEnd('/') + "/chat/completions";
+            if (!Uri.TryCreate(endpointText, UriKind.Absolute, out Uri endpoint))
+            {
+                throw new InvalidOperationException("API 地址无效，请填写完整的 HTTPS 地址。");
+            }
+
+            bool isLocalHttp = endpoint.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && (endpoint.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                    || endpoint.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+                    || endpoint.Host.Equals("[::1]", StringComparison.OrdinalIgnoreCase)
+                    || endpoint.Host.Equals("::1", StringComparison.OrdinalIgnoreCase));
+
+            if (!endpoint.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) && !isLocalHttp)
+            {
+                throw new InvalidOperationException("AI API 仅允许使用 HTTPS 地址（本机 localhost 调试可使用 HTTP）。");
+            }
+
+            return endpoint;
         }
 
         private void InitializeConfigPath()
@@ -147,14 +177,32 @@ namespace SlideSCI
 
         private void SaveConfig()
         {
+            string tempPath = null;
             try
             {
                 string json = JsonConvert.SerializeObject(currentConfig, Formatting.Indented);
-                File.WriteAllText(configPath, json);
+                tempPath = configPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                File.WriteAllText(tempPath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+                if (File.Exists(configPath))
+                {
+                    File.Replace(tempPath, configPath, null);
+                }
+                else
+                {
+                    File.Move(tempPath, configPath);
+                }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"保存设置失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(tempPath) && File.Exists(tempPath))
+                {
+                    try { File.Delete(tempPath); } catch { }
+                }
             }
         }
 
@@ -565,10 +613,40 @@ namespace SlideSCI
             }
         }
 
+        private bool ConfirmCodeExecution(string code)
+        {
+            const int maxPreviewLength = 6000;
+            if (code.Length > maxPreviewLength)
+            {
+                MessageBox.Show(
+                    $"AI 生成的 C# 代码超过 {maxPreviewLength} 个字符。为避免在无法完整审阅时执行代码，本次已拒绝执行。",
+                    "拒绝执行 AI 代码",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return false;
+            }
+
+            DialogResult result = MessageBox.Show(
+                "AI 请求执行以下 C# 代码。该代码可以修改当前演示文稿，并可能访问本机资源。是否继续？\n\n"
+                    + code,
+                "确认执行 AI 代码",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning
+            );
+            return result == DialogResult.Yes;
+        }
+
         private async Task RunAgentLoopAsync(CancellationToken token)
         {
             int maxIterations = 5;
             int currentIteration = 0;
+            if (string.IsNullOrWhiteSpace(currentConfig.Model))
+            {
+                throw new InvalidOperationException("请先在 AI 设置中填写模型名称。");
+            }
+
+            Uri apiEndpoint = CreateApiEndpoint(currentConfig.ApiUrl);
 
             var tools = new List<ChatTool>
             {
@@ -610,17 +688,44 @@ namespace SlideSCI
                 };
 
                 string requestJson = JsonConvert.SerializeObject(request);
-                var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
-
-                httpClient.DefaultRequestHeaders.Clear();
-                httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {currentConfig.ApiKey}");
-
-                string url = currentConfig.ApiUrl.TrimEnd('/') + "/chat/completions";
-                
-                HttpResponseMessage response;
+                string url = apiEndpoint.AbsoluteUri;
+                string responseJson;
                 try
                 {
-                    response = await httpClient.PostAsync(url, content, token);
+                    using (var requestMessage = new HttpRequestMessage(HttpMethod.Post, apiEndpoint))
+                    using (var content = new StringContent(requestJson, Encoding.UTF8, "application/json"))
+                    {
+                        requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", currentConfig.ApiKey);
+                        requestMessage.Content = content;
+
+                        using (HttpResponseMessage response = await httpClient.SendAsync(
+                            requestMessage,
+                            HttpCompletionOption.ResponseContentRead,
+                            token))
+                        {
+                            token.ThrowIfCancellationRequested();
+                            responseJson = await response.Content.ReadAsStringAsync();
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                string errorDetails = "";
+                                try
+                                {
+                                    var errRes = JsonConvert.DeserializeObject<ChatResponse>(responseJson);
+                                    errorDetails = errRes?.Error?.Message;
+                                }
+                                catch { }
+                                if (string.IsNullOrEmpty(errorDetails))
+                                {
+                                    errorDetails = responseJson;
+                                }
+                                throw new InvalidOperationException($"API 请求失败 (HTTP {response.StatusCode} - {response.ReasonPhrase}):\n{errorDetails}");
+                            }
+                        }
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    throw;
                 }
                 catch (OperationCanceledException)
                 {
@@ -631,24 +736,6 @@ namespace SlideSCI
                     throw new Exception($"无法连接到 AI 服务，网络连接异常: {ex.Message}\n请求地址: {url}\n\n详细信息:\n{ex.ToString()}");
                 }
 
-                token.ThrowIfCancellationRequested();
-                string responseJson = await response.Content.ReadAsStringAsync();
-                if (!response.IsSuccessStatusCode)
-                {
-                    string errorDetails = "";
-                    try
-                    {
-                        var errRes = JsonConvert.DeserializeObject<ChatResponse>(responseJson);
-                        errorDetails = errRes?.Error?.Message;
-                    }
-                    catch {}
-                    if (string.IsNullOrEmpty(errorDetails))
-                    {
-                        errorDetails = responseJson;
-                    }
-                    throw new Exception($"API 请求失败 (HTTP {response.StatusCode} - {response.ReasonPhrase}):\n{errorDetails}");
-                }
-
                 var chatRes = JsonConvert.DeserializeObject<ChatResponse>(responseJson);
                 if (chatRes == null || chatRes.Choices == null || chatRes.Choices.Count == 0)
                 {
@@ -656,6 +743,10 @@ namespace SlideSCI
                 }
 
                 var choiceMessage = chatRes.Choices[0].Message;
+                if (choiceMessage == null)
+                {
+                    throw new Exception("API 返回的消息为空，无法继续处理。");
+                }
                 conversationHistory.Add(choiceMessage);
 
                 if (!string.IsNullOrEmpty(choiceMessage.Content))
@@ -668,7 +759,7 @@ namespace SlideSCI
                     token.ThrowIfCancellationRequested();
                     foreach (var toolCall in choiceMessage.ToolCalls)
                     {
-                        if (toolCall.Function.Name == "execute_csharp_code")
+                        if (toolCall?.Function != null && toolCall.Function.Name == "execute_csharp_code")
                         {
                             string code = "";
                             try
@@ -695,14 +786,25 @@ namespace SlideSCI
 
                             AppendBubble($"[AI 请求执行 C# 代码]:\n{code}", isUser: false, isSystem: true);
 
-                            string runResult = "";
-                            try
+                            string runResult;
+                            if (string.IsNullOrWhiteSpace(code))
                             {
-                                runResult = CSharpExecutor.Execute(code, Globals.ThisAddIn.Application);
+                                runResult = "AI 未提供可执行的 C# 代码。";
                             }
-                            catch (Exception ex)
+                            else if (!ConfirmCodeExecution(code))
                             {
-                                runResult = $"Critical Runtime Error: {ex.Message}";
+                                runResult = "用户拒绝执行 AI 生成的 C# 代码。";
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    runResult = CSharpExecutor.Execute(code, Globals.ThisAddIn.Application);
+                                }
+                                catch (Exception ex)
+                                {
+                                    runResult = $"Critical Runtime Error: {ex.Message}";
+                                }
                             }
 
                             conversationHistory.Add(new ChatMessage
@@ -728,6 +830,18 @@ namespace SlideSCI
 
                 break;
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                try { cts?.Cancel(); } catch { }
+                try { cts?.Dispose(); } catch { }
+                cts = null;
+            }
+
+            base.Dispose(disposing);
         }
 
         public static Bitmap CreateIcon(string type, int size, Color color)
@@ -845,8 +959,9 @@ namespace SlideSCI
             btnRestoreDefault.FlatAppearance.BorderColor = Color.LightGray;
             btnRestoreDefault.Click += (s, e) => { txtSystemPrompt.Text = AISidebarControl.GetDefaultSystemPrompt(); };
 
-            btnSave = new Button { Text = "保存", DialogResult = DialogResult.OK, Location = new Point(380, 485), Width = 90, Height = 28, BackColor = Color.FromArgb(0, 120, 212), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            btnSave = new Button { Text = "保存", DialogResult = DialogResult.None, Location = new Point(380, 485), Width = 90, Height = 28, BackColor = Color.FromArgb(0, 120, 212), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
             btnSave.FlatAppearance.BorderSize = 0;
+            btnSave.Click += BtnSave_Click;
             btnCancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel, Location = new Point(490, 485), Width = 90, Height = 28, FlatStyle = FlatStyle.Flat };
             btnCancel.FlatAppearance.BorderColor = Color.LightGray;
 
@@ -860,6 +975,61 @@ namespace SlideSCI
             this.CancelButton = btnCancel;
             btnAddPreset.Click += BtnAddPreset_Click;
             btnDeletePreset.Click += BtnDeletePreset_Click;
+        }
+
+        private void BtnSave_Click(object sender, EventArgs e)
+        {
+            SaveCurrentPresetEdits();
+            AIPreset selected = cmbPresets.SelectedItem as AIPreset;
+
+            if (selected == null || string.IsNullOrWhiteSpace(selected.Name))
+            {
+                MessageBox.Show("预设名称不能为空。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            bool duplicateName = false;
+            foreach (AIPreset preset in tempPresets)
+            {
+                if (!object.ReferenceEquals(preset, selected)
+                    && preset != null
+                    && string.Equals(preset.Name, selected.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    duplicateName = true;
+                    break;
+                }
+            }
+
+            if (duplicateName)
+            {
+                MessageBox.Show("预设名称不能重复。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!Uri.TryCreate(selected.ApiUrl, UriKind.Absolute, out Uri apiUri))
+            {
+                MessageBox.Show("API 地址无效，请填写完整的 HTTPS 地址。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            bool localHttp = apiUri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && (apiUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                    || apiUri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+                    || apiUri.Host.Equals("::1", StringComparison.OrdinalIgnoreCase));
+            if (!apiUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) && !localHttp)
+            {
+                MessageBox.Show("AI API 仅允许使用 HTTPS 地址（本机 localhost 调试可使用 HTTP）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(selected.Model))
+            {
+                MessageBox.Show("模型名称不能为空。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            this.DialogResult = DialogResult.OK;
+            this.Close();
         }
 
         private void LoadPresetsToCombo()
@@ -971,10 +1141,109 @@ namespace SlideSCI
     {
         public string Name { get; set; } = "APIMart";
         public string ApiUrl { get; set; } = "https://api.apimart.ai/v1";
-        public string ApiKey { get; set; } = "";
+        private string apiKey = "";
+        private string preservedEncryptedApiKey;
+
+        [JsonIgnore]
+        public string ApiKey
+        {
+            get => apiKey;
+            set
+            {
+                apiKey = value ?? "";
+                preservedEncryptedApiKey = null;
+            }
+        }
+
+        // Keep the public JSON field name for migration compatibility, but store
+        // the value encrypted with Windows DPAPI for the current user.
+        [JsonProperty("ApiKey")]
+        private string SerializedApiKey
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(preservedEncryptedApiKey))
+                {
+                    return preservedEncryptedApiKey;
+                }
+                return ProtectApiKey(apiKey);
+            }
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    apiKey = "";
+                    preservedEncryptedApiKey = null;
+                    return;
+                }
+
+                if (!value.StartsWith("dpapi:", StringComparison.Ordinal))
+                {
+                    // Legacy configurations stored the key in plain text. Keep
+                    // it in memory only; the next successful save encrypts it.
+                    apiKey = value;
+                    preservedEncryptedApiKey = null;
+                    return;
+                }
+
+                try
+                {
+                    apiKey = UnprotectApiKey(value);
+                    preservedEncryptedApiKey = null;
+                }
+                catch
+                {
+                    // Preserve an encrypted value that belongs to another user
+                    // instead of silently overwriting it with an empty key.
+                    apiKey = "";
+                    preservedEncryptedApiKey = value;
+                }
+            }
+        }
+
         public string Model { get; set; } = "deepseek-v4-flash";
         public string SystemPrompt { get; set; } = "";
         public override string ToString() => Name;
+
+        private static string ProtectApiKey(string apiKey)
+        {
+            if (string.IsNullOrEmpty(apiKey)) return "";
+
+            try
+            {
+                byte[] protectedBytes = ProtectedData.Protect(
+                    Encoding.UTF8.GetBytes(apiKey),
+                    optionalEntropy: null,
+                    scope: DataProtectionScope.CurrentUser
+                );
+                return "dpapi:" + Convert.ToBase64String(protectedBytes);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("无法使用 Windows DPAPI 加密 AI API Key。", ex);
+            }
+        }
+
+        private static string UnprotectApiKey(string storedValue)
+        {
+            if (string.IsNullOrEmpty(storedValue)) return "";
+            if (!storedValue.StartsWith("dpapi:", StringComparison.Ordinal)) return storedValue;
+
+            try
+            {
+                byte[] protectedBytes = Convert.FromBase64String(storedValue.Substring("dpapi:".Length));
+                byte[] plainBytes = ProtectedData.Unprotect(
+                    protectedBytes,
+                    optionalEntropy: null,
+                    scope: DataProtectionScope.CurrentUser
+                );
+                return Encoding.UTF8.GetString(plainBytes);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("无法解密 AI API Key；该配置可能属于其他 Windows 用户。", ex);
+            }
+        }
     }
 
     public class AIConfig

@@ -9,6 +9,13 @@ namespace SlideSCI
             if (win1 == null || win2 == null) return win1 == win2;
             try
             {
+                // HWND identifies the actual PowerPoint document window and is
+                // safer than comparing captions for multiple unsaved documents.
+                if (win1.HWND != 0 && win2.HWND != 0)
+                {
+                    return win1.HWND == win2.HWND;
+                }
+
                 if (win1.Caption != win2.Caption) return false;
                 if (win1.Presentation.Name != win2.Presentation.Name) return false;
                 if (win1.Presentation.FullName != win2.Presentation.FullName) return false;
@@ -169,6 +176,23 @@ namespace SlideSCI
 
         private void ThisAddIn_Shutdown(object sender, System.EventArgs e)
         {
+            try
+            {
+                foreach (Microsoft.Office.Tools.CustomTaskPane pane in this.CustomTaskPanes)
+                {
+                    try
+                    {
+                        if (pane.Control is System.IDisposable disposable)
+                        {
+                            disposable.Dispose();
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            LatexSvgConverter = null;
         }
 
         #region VSTO 生成的代码

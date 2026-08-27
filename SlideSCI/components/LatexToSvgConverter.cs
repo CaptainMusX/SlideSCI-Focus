@@ -2,11 +2,13 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace SlideSCI
 {
     public class LatexToSvgConverter
     {
+        private static readonly TimeSpan ConversionTimeout = TimeSpan.FromSeconds(60);
         private readonly string _nodeExecutable;
         private readonly string _scriptPath;
         private readonly string _workingDirectory;
@@ -72,10 +74,19 @@ namespace SlideSCI
                         writer.Flush();
                     }
 
-                    string output = process.StandardOutput.ReadToEnd();
-                    string error = process.StandardError.ReadToEnd();
+                    // Read both streams concurrently so a verbose Node process
+                    // cannot deadlock on a full stderr buffer.
+                    Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+                    Task<string> errorTask = process.StandardError.ReadToEndAsync();
 
-                    process.WaitForExit();
+                    if (!process.WaitForExit((int)ConversionTimeout.TotalMilliseconds))
+                    {
+                        try { process.Kill(); } catch { }
+                        throw new InvalidOperationException("LaTeX 转换超时（超过 60 秒），已终止 Node.js 进程。");
+                    }
+
+                    string output = outputTask.GetAwaiter().GetResult();
+                    string error = errorTask.GetAwaiter().GetResult();
 
                     if (process.ExitCode != 0)
                     {

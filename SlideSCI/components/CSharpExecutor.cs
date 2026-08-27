@@ -13,6 +13,22 @@ namespace SlideSCI
     {
         public static string Execute(string code, PowerPoint.Application app)
         {
+            if (app == null)
+            {
+                return "Execution Error: PowerPoint application is unavailable.";
+            }
+
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                return "Execution Error: no C# code was provided.";
+            }
+
+            const int maxCodeLength = 100000;
+            if (code.Length > maxCodeLength)
+            {
+                return $"Execution Error: C# code exceeds the {maxCodeLength} character limit.";
+            }
+
             using (var provider = new CSharpCodeProvider())
             {
                 var parameters = new CompilerParameters();

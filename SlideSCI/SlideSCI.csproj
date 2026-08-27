@@ -25,7 +25,9 @@
     <OutputType>Library</OutputType>
     <NoStandardLibraries>false</NoStandardLibraries>
     <RootNamespace>SlideSCI</RootNamespace>
-    <AssemblyName>SlideSCI</AssemblyName>
+    <!-- A fork-specific VSTO identity prevents Office from reusing stale
+         ClickOnce state belonging to the upstream SlideSCI add-in ID. -->
+    <AssemblyName>CaptainMusX.SlideSCI</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <DefineConstants>VSTO40</DefineConstants>
     <IsWebBootstrapper>False</IsWebBootstrapper>
@@ -33,7 +35,7 @@
     <PublishUrl>D:\Code\SlideSCI\SlideSCI\publish\</PublishUrl>
     <InstallUrl />
     <TargetCulture>zh-chs</TargetCulture>
-    <ApplicationVersion>1.2.0.0</ApplicationVersion>
+    <ApplicationVersion>1.9.2.0</ApplicationVersion>
     <AutoIncrementApplicationRevision>false</AutoIncrementApplicationRevision>
     <UpdateEnabled>true</UpdateEnabled>
     <UpdateInterval>7</UpdateInterval>
@@ -44,6 +46,7 @@
     <FriendlyName>SlideSCI</FriendlyName>
     <OfficeApplicationDescription />
     <LoadBehavior>3</LoadBehavior>
+    <SlideSCIBundleLatexRuntime Condition="'$(SlideSCIBundleLatexRuntime)' == ''">false</SlideSCIBundleLatexRuntime>
   </PropertyGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.7.2">
@@ -140,6 +143,7 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Net.Http" />
+    <Reference Include="System.Security" />
     <Reference Include="System.Numerics" />
     <Reference Include="System.Runtime.CompilerServices.Unsafe, Version=6.0.1.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Runtime.CompilerServices.Unsafe.6.1.0\lib\net462\System.Runtime.CompilerServices.Unsafe.dll</HintPath>
@@ -200,6 +204,7 @@
     <Compile Include="components\CodeHighlighter.cs" />
     <Compile Include="components\CSharpExecutor.cs" />
     <Compile Include="components\LatexToSvgConverter.cs" />
+    <Compile Include="components\PowerPointContext.cs" />
     <Compile Include="components\InputDialog.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -231,7 +236,6 @@
       <DependentUpon>Ribbon1.cs</DependentUpon>
     </EmbeddedResource>
     <None Include="app.config" />
-    <None Include="SlideSCI_TemporaryKey.pfx" />
     <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
@@ -251,7 +255,6 @@
     <Compile Include="ThisAddIn.cs">
       <SubType>Code</SubType>
     </Compile>
-    <None Include="SW_Tools_TemporaryKey.pfx" />
     <None Include="ThisAddIn.Designer.xml">
       <DependentUpon>ThisAddIn.cs</DependentUpon>
     </None>
@@ -267,6 +270,29 @@
     <Content Include="latex-converter\package.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- Publish only Node runtime files. MathJax also ships TypeScript sources,
+         maps and documentation that are not needed by latex-to-svg.js and make
+         ClickOnce path-length warnings much worse. -->
+    <Content Include="latex-converter\node_modules\**\*.js"
+             Exclude="latex-converter\node_modules\mathjax-full\components\**;latex-converter\node_modules\mathjax-full\ts\**;latex-converter\node_modules\mathjax-full\js\input\asciimath\**"
+             Condition="'$(SlideSCIBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="latex-converter\node_modules\**\*.cjs"
+             Exclude="latex-converter\node_modules\mathjax-full\components\**;latex-converter\node_modules\mathjax-full\ts\**;latex-converter\node_modules\mathjax-full\js\input\asciimath\**"
+             Condition="'$(SlideSCIBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="latex-converter\node_modules\**\*.mjs"
+             Exclude="latex-converter\node_modules\mathjax-full\components\**;latex-converter\node_modules\mathjax-full\ts\**;latex-converter\node_modules\mathjax-full\js\input\asciimath\**"
+             Condition="'$(SlideSCIBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="latex-converter\node_modules\**\*.json"
+             Exclude="latex-converter\node_modules\mathjax-full\components\**;latex-converter\node_modules\mathjax-full\ts\**;latex-converter\node_modules\mathjax-full\js\input\asciimath\**"
+             Condition="'$(SlideSCIBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
@@ -276,16 +302,14 @@
     <SignManifests>true</SignManifests>
   </PropertyGroup>
   <PropertyGroup>
-    <ManifestKeyFile>SlideSCI_TemporaryKey.pfx</ManifestKeyFile>
-  </PropertyGroup>
-  <PropertyGroup>
-    <ManifestCertificateThumbprint>E146EF3F86D8CBCC8922F6AF9A30BBEEEE1EC5AE</ManifestCertificateThumbprint>
-  </PropertyGroup>
-  <PropertyGroup>
     <SignAssembly>true</SignAssembly>
   </PropertyGroup>
+  <!-- Signing inputs are supplied by build/Build-Installer.ps1 or a local
+       Visual Studio environment. Private keys are not stored in the repository. -->
   <PropertyGroup>
-    <AssemblyOriginatorKeyFile>SlideSCI_TemporaryKey.pfx</AssemblyOriginatorKeyFile>
+    <ManifestKeyFile Condition="'$(SlideSCIManifestKeyFile)' != ''">$(SlideSCIManifestKeyFile)</ManifestKeyFile>
+    <AssemblyOriginatorKeyFile Condition="'$(SlideSCIAssemblyKeyFile)' != ''">$(SlideSCIAssemblyKeyFile)</AssemblyOriginatorKeyFile>
+    <ManifestCertificateThumbprint Condition="'$(SlideSCIManifestCertificateThumbprint)' != ''">$(SlideSCIManifestCertificateThumbprint)</ManifestCertificateThumbprint>
   </PropertyGroup>
   <!-- Include the build rules for a C# project. -->
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

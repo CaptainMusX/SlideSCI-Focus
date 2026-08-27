@@ -167,11 +167,37 @@ namespace SlideSCI
             RefreshSelection();
         }
 
+        private void ReleaseScaleInfo(ShapeScaleInfo info)
+        {
+            if (info == null) return;
+
+            PowerPointContext.Release(info.ActualShape);
+            info.ActualShape = null;
+            foreach (TextRunInfo run in info.TextRuns)
+            {
+                PowerPointContext.Release(run.TextRange);
+                run.TextRange = null;
+            }
+            foreach (ShapeScaleInfo child in info.GroupChildren)
+            {
+                ReleaseScaleInfo(child);
+            }
+        }
+
+        private void ClearScaleInfos()
+        {
+            foreach (ShapeScaleInfo info in scaleInfos)
+            {
+                ReleaseScaleInfo(info);
+            }
+            scaleInfos.Clear();
+        }
+
         public void RefreshSelection()
         {
             if (isApplying) return;
 
-            scaleInfos.Clear();
+            ClearScaleInfos();
             try
             {
                 PowerPoint.Selection sel = app.ActiveWindow.Selection;
@@ -201,6 +227,15 @@ namespace SlideSCI
                 lblInfo.Text = $"加载选区失败：{ex.Message}";
                 SetControlsEnabled(false);
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ClearScaleInfos();
+            }
+            base.Dispose(disposing);
         }
 
         private void RecordShapeScaleInfo(PowerPoint.Shape shape, List<ShapeScaleInfo> list)

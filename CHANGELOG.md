@@ -1,3 +1,9 @@
+## v1.9.2 / 20260826
+- 🐛 修复自动排列输入、Markdown 转换、组格式粘贴和素材库文件操作的稳定性问题
+- 🔒 AI API Key 使用 Windows DPAPI 保存，执行 AI 生成的 C# 代码前增加确认
+- 🔧 改进 LaTeX 转换超时处理、PowerPoint COM 清理和 VSTO 发布流程
+- 📦 安装器改为直接 VSTO 布局，并使用 `CaptainMusX.SlideSCI` 独立加载项身份，清理原版和旧测试版的 ClickOnce 元数据；默认不捆绑 MathJax 依赖
+
 ## v1.9.1 / 20260816
 - 🎨 添加赞助商APIMart
 
@@ -28,8 +34,8 @@
 - 🎨 新增水平居中和垂直居中按钮，默认以选中的第一个对象为参考
 - 🎨 复制粘贴格式升级，区分文本格式和形状格式
 - 🎨 复制位置支持选择位置
-- 🎨 支持全选页面文本框 [#67](https://github.com/Achuan-2/my_ppt_plugin/issues/67)
-- 🎨 插入latex文字优化 [#61](https://github.com/Achuan-2/my_ppt_plugin/issues/61)
+- 🎨 支持全选页面文本框 [#67](https://github.com/Achuan-2/SlideSCI/issues/67)
+- 🎨 插入latex文字优化 [#61](https://github.com/Achuan-2/SlideSCI/issues/61)
 - 🎨 支持含有markdown的文本框直接转富文本
 - 🎨 插入Markdown多个段落时自动组合
 - 🎨 插入Markdown支持粘贴SVG
@@ -38,13 +44,13 @@
 ## v1.4 / 20251129
 
 - 🎨任何对象都可以添加图片标题
-- 🎨子图标签设置times new roman字体修复 [#53](https://github.com/Achuan-2/my_ppt_plugin/issues/53)
+- 🎨子图标签设置times new roman字体修复 [#53](https://github.com/Achuan-2/SlideSCI/issues/53)
 
 ## v1.3 / 20250929
 - ✨支持插入latex svg，以解决插入latex文字版本有些latex语法不支持的问题
   - 配置方法（需要node.js环境）
     - 配置Node.js环境
-    - 进入插件安装文件夹的latex-converter文件夹，默认为`%APPDATA%\Achuan-2\SlideSCI\latex-converter`
+    - 进入插件安装文件夹的latex-converter文件夹
     - 运行`npm install`安装
 
 ## v1.2 / 20250929
@@ -54,9 +60,9 @@
 
 ## v1.1 / 2025.09.24
 
-- ✨图片添加标签新增计数器、更新标签文本功能 [#36](https://github.com/Achuan-2/my_ppt_plugin/issues/36)
-- ✨图片标签-增加更新标签功能 [#42](https://github.com/Achuan-2/my_ppt_plugin/issues/42)
-- ✨图片标签：标签模板新增(a)和(A) [#44](https://github.com/Achuan-2/my_ppt_plugin/issues/44)
+- ✨图片添加标签新增计数器、更新标签文本功能 [#36](https://github.com/Achuan-2/SlideSCI/issues/36)
+- ✨图片标签-增加更新标签功能 [#42](https://github.com/Achuan-2/SlideSCI/issues/42)
+- ✨图片标签：标签模板新增(a)和(A) [#44](https://github.com/Achuan-2/SlideSCI/issues/44)
 - ✨图片标签添加Time new Roman字体
 
 ## v1.0.2.1 / 2025.07.09
@@ -80,7 +86,7 @@
 
 
 ## v1.0.1.7 / 2025.07.07
-- ✨ PPT复制原始图片到剪贴板 [#32](https://github.com/Achuan-2/my_ppt_plugin/issues/32)
+- ✨ PPT复制原始图片到剪贴板 [#32](https://github.com/Achuan-2/SlideSCI/issues/32)
   - 实现方案：**直接复制形状+临时调整尺寸**
 
     1. 不用export函数+临时文件复制方案，直接用shape copy复制到剪贴板
@@ -91,7 +97,7 @@
     - 设置这个功能就是方便自己从ppt复制图片到笔记软件，方便整理，不需要追求原始图片保存，真要保存，可以用ppt自带的复制原始图片功能
     - 这个方案比较实用，比如512*512的tif，如果是原始图片直接复制就太小了，粘贴到笔记软件不方便查看，更别说很多笔记软件并不支持显示tif，一般图片调整到幻灯片高度都是能看的
 - ✨ feat(添加标题): 支持给视频添加标题
-- ✨ feat(代码块高亮）：支持R语言代码高亮 [#31](https://github.com/Achuan-2/my_ppt_plugin/issues/31)
+- ✨ feat(代码块高亮）：支持R语言代码高亮 [#31](https://github.com/Achuan-2/SlideSCI/issues/31)
 - ✨ feat(添加标题): 支持给视频添加标题
 
 ## v1.0.1.6 / 2025.05.22
@@ -112,13 +118,13 @@
 
 
 ## v1.0.1.3 / 2025.05.04
-- 🐛 fix(列表转换): 修复有序列表编号保存问题 [#27](https://github.com/Achuan-2/my_ppt_plugin/issues/27)
+- 🐛 fix(列表转换): 修复有序列表编号保存问题 [#27](https://github.com/Achuan-2/SlideSCI/issues/27)
   - 保持列表编号项目符号类型（之前会把ABCD的样式变为1234）
   - 保存列表编号起始值（之前会把开头为序号2的列表改为序号1）
 - 🐛 fix(列表转换): 避免列表样式受后续字体样式干扰
 
 ## v1.0.1.2/ 2025.05.04
-- 🐛fix (公式处理): 修复行内数学公式插入吞字问题 [#26](https://github.com/Achuan-2/my_ppt_plugin/issues/26)
+- 🐛fix (公式处理): 修复行内数学公式插入吞字问题 [#26](https://github.com/Achuan-2/SlideSCI/issues/26)
 
 ## v1.0.1.1 / 2025.05.04
 
@@ -146,7 +152,7 @@
 
 ## v1.0.0.54 / 2025.02.15
 - 🐛 fix：某些图片无法添加图片标题
-- ✨ 图片和文字组合支持同步缩放 [#18](https://github.com/Achuan-2/my_ppt_plugin/issues/18)
+- ✨ 图片和文字组合支持同步缩放 [#18](https://github.com/Achuan-2/SlideSCI/issues/18)
 - ✨ 图片标签和标题添加时，自动全选中添加的标签和标题，方便修改
 
 ## v1.0.0.53 / 2025.01.24

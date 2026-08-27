@@ -97,7 +97,7 @@ GitHub: [https://github.com/Achuan-2/SlideSCI](https://github.com/Achuan-2/Slide
 
 ## 🖥️ Installation
 
-1. Download the plugin's `.exe` installer from GitHub [Releases](https://github.com/Achuan-2/my_ppt_plugin/releases)
+1. Download the plugin's `.exe` installer from GitHub [Releases](https://github.com/Achuan-2/SlideSCI/releases)
 2. Double-click to install
    
 Important:
@@ -119,7 +119,7 @@ Troubleshooting:
 
 * **LaTeX formulas display incorrectly?**  
   Best for single-line formulas. For complex multi-line formulas, use [IguanaTex](https://github.com/Jonathan-LeRoux/IguanaTex).  
-  See examples of PPT-specific LaTeX syntax [here](https://github.com/Achuan-2/my_ppt_plugin/issues/7).
+  See examples of PPT-specific LaTeX syntax [here](https://github.com/Achuan-2/SlideSCI/issues/7).
 
 ## ❤️ Support My Work
 
@@ -134,7 +134,7 @@ See the list of donors here: https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/asse
 
 If you encounter any problems during use, you can provide feedback through the following ways:
 
-1. Submit an [Issue](https://github.com/Achuan-2/my_ppt_plugin/issues) on GitHub
+1. Submit an [Issue](https://github.com/Achuan-2/SlideSCI/issues) on GitHub
 2. Send an email to: achuan-2@outlook.com
 
 
