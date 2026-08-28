@@ -6348,7 +6348,7 @@ namespace SlideSCI
                     return;
                 }
 
-                using (var dialog = new ZoomInsetForm())
+                using (var dialog = new ZoomInsetForm(box.Width, box.Height, picture.Width, picture.Height))
                 {
                     if (dialog.ShowDialog() != DialogResult.OK) return;
 
@@ -6363,6 +6363,9 @@ namespace SlideSCI
                         dialog.LineStyle,
                         dialog.LineWeight,
                         dialog.BoxLineWeight,
+                        dialog.LineColorRgb,
+                        dialog.BoxColorRgb,
+                        dialog.LineDashStyle,
                         dialog.GroupEnabled,
                         app);
 

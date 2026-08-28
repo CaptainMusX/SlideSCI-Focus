@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.Office.Core;
 using PowerPoint = Microsoft.Office.Interop.PowerPoint;
+using Office = Microsoft.Office.Core;
 
 namespace SlideSCI
 {
@@ -32,13 +33,19 @@ namespace SlideSCI
         public string Error { get; set; }
         public List<PowerPoint.Shape> Created { get; } = new List<PowerPoint.Shape>();
         public PowerPoint.Shape Group { get; set; }
+        public bool Glued { get; set; } = true;
     }
 
     /// <summary>
-    /// 「局部放大图」功能的纯 COM 实现：
-    /// 在原图上放置选区框（InsertZoomBox），再把框内区域裁剪放大到目标尺寸、
-    /// 用细线连接框角与放大图角（GenerateZoomInset）。
-    /// 生成物统一以 SlideSCI_Zoom* 前缀命名，便于重新生成时定位与清理。
+    /// 「局部放大图」功能的纯 COM 实现。
+    ///
+    /// 像素保真：所有操作只在形状层进行（复制、裁剪、缩放、连线、编组），
+    /// 不导出文件、不重新编码图像，原图像素始终原封不动。
+    ///
+    /// 连线吸附：连线的端点通过 PowerPoint 原生连接点（BeginConnect/EndConnect）
+    /// 粘附到「选区框的四角」和「放大图四角的隐形锚点」（锚点与放大图编组在一起）。
+    /// 之后移动选区框或放大图，连线会自动跟随拉伸，无需重新计算坐标。
+    /// 连接点索引因 PowerPoint 版本而异，实现通过试连 + 测距自动校准到最近的真实角点。
     /// </summary>
     public static class ZoomInsetHelper
     {
@@ -46,6 +53,7 @@ namespace SlideSCI
         public const string InsetNamePrefix = "SlideSCI_ZoomInset_";
 
         private const float PointsPerCm = 28.3464593f;
+        private const float SocketSizePoints = 6f;
 
         public static float CmToPoints(float cm) => cm * PointsPerCm;
 
@@ -74,8 +82,7 @@ namespace SlideSCI
         /// </summary>
         public static PowerPoint.Shape FindZoomBox(PowerPoint.Slide slide)
         {
-            List<PowerPoint.Shape> all = CollectAllShapes(slide);
-            foreach (PowerPoint.Shape shape in all)
+            foreach (PowerPoint.Shape shape in CollectAllShapes(slide))
             {
                 if (IsZoomBox(shape)) return shape;
             }
@@ -146,7 +153,7 @@ namespace SlideSCI
         }
 
         /// <summary>
-        /// 计算放大图的目标尺寸。
+        /// 计算放大图的目标尺寸（纯几何换算，不触碰像素）。
         /// </summary>
         public static void ComputeTargetSize(PowerPoint.Shape picture, PowerPoint.Shape box,
             ZoomTargetMode mode, float magnification, float customWidthCm,
@@ -175,8 +182,9 @@ namespace SlideSCI
 
         /// <summary>
         /// 生成局部放大图：
-        /// 1) 清理旧生成物（仅保留选区框本身）；2) 复制原图并按框裁剪放大；
-        /// 3) 画连接线；4) 可选整体编组并选中。
+        /// 1) 清理旧生成物（仅保留选区框）；2) 复制原图并按框裁剪放大（像素无损）；
+        /// 3) 在放大图四角放置隐形锚点并与放大图编组；4) 画连接线并粘附到角点；
+        /// 5) 可选整体编组。
         /// </summary>
         public static ZoomInsetResult GenerateZoomInset(
             PowerPoint.Slide slide,
@@ -188,13 +196,15 @@ namespace SlideSCI
             ZoomLineStyle lineStyle,
             float lineWeight,
             float boxLineWeight,
+            int lineColorRgb,
+            int boxColorRgb,
+            Office.MsoLineDashStyle lineDash,
             bool group,
             PowerPoint.Application app)
         {
             var result = new ZoomInsetResult();
             try
             {
-                // 0) 前置校验
                 if (box == null || picture == null)
                 {
                     result.Error = "未找到选区框或原图。请重新点击「插入选区框」后再试。";
@@ -207,8 +217,7 @@ namespace SlideSCI
                     return result;
                 }
 
-                // 1) 清理上一次生成物：先拆开包含生成物的编组，再删除放大图与连线，
-                //    保留选区框（可能已被用户移动到目标区域）。
+                // 1) 清理：拆开包含生成物的编组，删除旧的放大图/锚点/连线，保留选区框
                 CleanUpPreviousArtifacts(slide);
 
                 // 2) 把选区框几何夹取到原图范围内
@@ -226,16 +235,17 @@ namespace SlideSCI
                     return result;
                 }
 
-                // 3) 裁剪比例：框相对原图的百分比（PowerPoint Crop* 取值 0~1）
+                // 3) 裁剪比例（PowerPoint Crop* 取值 0~1）
                 float cropLeft = (boxLeft - picLeft) / picture.Width;
                 float cropTop = (boxTop - picTop) / picture.Height;
                 float cropRight = (picRight - boxRight) / picture.Width;
                 float cropBottom = (picBottom - boxBottom) / picture.Height;
 
-                // 4) 复制原图 → 先缩放到框大小 → 裁剪 → 再放大到目标尺寸
+                // 4) 复制原图 → 缩放到框大小 → 裁剪 → 放大到目标尺寸
+                //    （全部是矢量操作：像素数据原样随形状缩放，绝不重新编码）
                 PowerPoint.Shape dup = picture.Duplicate()[1];
                 dup.Name = MakeInsetName(box.Id, "Pic");
-                result.Created.Add(dup);
+                float dupLeft, dupTop;
                 try
                 {
                     dup.LockAspectRatio = MsoTriState.msoFalse;
@@ -245,92 +255,88 @@ namespace SlideSCI
                     dup.PictureFormat.CropTop = cropTop;
                     dup.PictureFormat.CropRight = cropRight;
                     dup.PictureFormat.CropBottom = cropBottom;
+
+                    dup.Width = targetWidth;
+                    dup.Height = targetHeight;
+                    dupLeft = picLeft;
+                    dupTop = picBottom + gapPoints;
+                    dup.Left = dupLeft;
+                    dup.Top = dupTop;
                 }
                 catch
                 {
                     try { dup.Delete(); } catch { }
-                    result.Created.Clear();
                     result.Error = "该图片不支持裁剪复制（可能是占位符粘贴的图片或链接图片）。请先在图片上右键 →「剪切」再原位「粘贴」为普通图片后重试。";
                     return result;
                 }
+                result.Created.Add(dup);
 
-                dup.Width = targetWidth;
-                dup.Height = targetHeight;
-                dup.Left = picLeft;
-                dup.Top = picBottom + gapPoints;
+                // 5) 放大图四角的隐形锚点（与放大图编组，作为连线粘附点）
+                var socketNames = new List<string>();
+                var corners = new[] { "TL", "TR", "BL", "BR" };
+                foreach (string tag in corners)
+                {
+                    (float cx, float cy) = GetCorner(dup, tag);
+                    PowerPoint.Shape socket = CreateSocket(slide, cx, cy, box.Id, tag);
+                    socketNames.Add(socket.Name);
+                    result.Created.Add(socket);
+                }
 
-                // 5) 画连接线
-                float boxBLx = box.Left, boxBLy = box.Top + box.Height;
-                float boxBRx = box.Left + box.Width, boxBRy = box.Top + box.Height;
-                float boxTLx = box.Left, boxTLy = box.Top;
-                float boxTRx = box.Left + box.Width, boxTRy = box.Top;
-                float insTLx = dup.Left, insTLy = dup.Top;
-                float insTRx = dup.Left + dup.Width, insTRy = dup.Top;
-                float insBLx = dup.Left, insBLy = dup.Top + dup.Height;
-                float insBRx = dup.Left + dup.Width, insBRy = dup.Top + dup.Height;
+                // 6) 放大图 + 锚点 编组为「放大图单元」
+                var unitNames = new List<string> { dup.Name };
+                unitNames.AddRange(socketNames);
+                PowerPoint.Shape unit = slide.Shapes.Range(unitNames.ToArray()).Group();
+                unit.Name = MakeInsetName(box.Id, "Unit");
+                result.Created.Add(unit);
 
-                var lineEnds = new List<(float x1, float y1, float x2, float y2)>();
+                // 7) 连接线：粘附到 选区框角 ↔ 锚点角
+                var lineShapes = new List<PowerPoint.Shape>();
+                var lineEnds = new List<(string boxCorner, string insetCorner)>();
                 if (lineStyle == ZoomLineStyle.JournalFunnel)
                 {
                     // 期刊漏斗：框下两角 → 放大图上两角（平行、非同角直连）
-                    lineEnds.Add((boxBLx, boxBLy, insTLx, insTLy));
-                    lineEnds.Add((boxBRx, boxBRy, insTRx, insTRy));
+                    lineEnds.Add(("BL", "TL"));
+                    lineEnds.Add(("BR", "TR"));
                 }
                 else
                 {
                     // 交叉 X 形：四角交叉连接
-                    lineEnds.Add((boxTLx, boxTLy, insTRx, insTRy));
-                    lineEnds.Add((boxTRx, boxTRy, insTLx, insTLy));
-                    lineEnds.Add((boxBLx, boxBLy, insBRx, insBRy));
-                    lineEnds.Add((boxBRx, boxBRy, insBLx, insBLy));
+                    lineEnds.Add(("TL", "TR"));
+                    lineEnds.Add(("TR", "TL"));
+                    lineEnds.Add(("BL", "BR"));
+                    lineEnds.Add(("BR", "BL"));
                 }
 
                 int lineIndex = 0;
-                foreach (var (x1, y1, x2, y2) in lineEnds)
+                foreach (var (boxCorner, insetCorner) in lineEnds)
                 {
-                    PowerPoint.Shape line = slide.Shapes.AddConnector(
-                        MsoConnectorType.msoConnectorStraight, x1, y1, x2, y2);
-                    line.Name = MakeInsetName(box.Id, "Line" + (++lineIndex));
-                    line.Line.ForeColor.RGB = 0x000000;
-                    line.Line.Weight = lineWeight;
+                    PowerPoint.Shape line = CreateLine(slide, box, dup, boxCorner, insetCorner,
+                        box.Id, ++lineIndex, lineWeight, lineColorRgb, lineDash);
+                    lineShapes.Add(line);
                     result.Created.Add(line);
                 }
 
-                // 6) 更新框线样式（对话框可能改了线宽）
+                // 8) 更新框线样式
                 try
                 {
-                    box.Line.ForeColor.RGB = 0x000000;
+                    box.Line.ForeColor.RGB = boxColorRgb;
                     box.Line.Weight = boxLineWeight;
                 }
                 catch { }
 
-                // 7) 可选编组
+                // 9) 可选整体编组（框 + 放大图单元 + 连线）
+                var allNames = new List<string> { box.Name, unit.Name };
+                foreach (PowerPoint.Shape line in lineShapes) allNames.Add(line.Name);
+
                 if (group)
                 {
-                    var names = new List<string>();
-                    foreach (PowerPoint.Shape shape in result.Created)
-                    {
-                        names.Add(shape.Name);
-                    }
-                    names.Add(box.Name);
-
-                    PowerPoint.Shape groupShape = slide.Shapes.Range(names.ToArray()).Group();
+                    PowerPoint.Shape groupShape = slide.Shapes.Range(allNames.ToArray()).Group();
                     result.Group = groupShape;
-                    try
-                    {
-                        app.ActiveWindow.Selection.Unselect();
-                        slide.Shapes.Range(new object[] { groupShape.Name }).Select();
-                    }
-                    catch { }
+                    SelectShape(app, groupShape);
                 }
                 else
                 {
-                    try
-                    {
-                        app.ActiveWindow.Selection.Unselect();
-                        slide.Shapes.Range(namesOf(result.Created)).Select();
-                    }
-                    catch { }
+                    SelectShapes(app, slide, allNames.ToArray());
                 }
 
                 result.Ok = true;
@@ -344,11 +350,155 @@ namespace SlideSCI
             }
         }
 
-        private static object[] namesOf(List<PowerPoint.Shape> shapes)
+        private static void SelectShape(PowerPoint.Application app, PowerPoint.Shape shape)
         {
-            var names = new object[shapes.Count];
-            for (int i = 0; i < shapes.Count; i++) names[i] = shapes[i].Name;
-            return names;
+            try
+            {
+                app.ActiveWindow.Selection.Unselect();
+                shape.Select();
+            }
+            catch { }
+        }
+
+        private static void SelectShapes(PowerPoint.Application app, PowerPoint.Slide slide, object[] names)
+        {
+            try
+            {
+                app.ActiveWindow.Selection.Unselect();
+                slide.Shapes.Range(names).Select();
+            }
+            catch { }
+        }
+
+        private static (float x, float y) GetCorner(PowerPoint.Shape shape, string tag)
+        {
+            switch (tag)
+            {
+                case "TR": return (shape.Left + shape.Width, shape.Top);
+                case "BL": return (shape.Left, shape.Top + shape.Height);
+                case "BR": return (shape.Left + shape.Width, shape.Top + shape.Height);
+                default: return (shape.Left, shape.Top); // TL
+            }
+        }
+
+        /// <summary>隐形矩形锚点：中心位于目标角点，作为连线粘附点。</summary>
+        private static PowerPoint.Shape CreateSocket(PowerPoint.Slide slide, float centerX, float centerY,
+            int boxId, string tag)
+        {
+            PowerPoint.Shape socket = slide.Shapes.AddShape(
+                MsoAutoShapeType.msoShapeRectangle,
+                centerX - SocketSizePoints / 2f,
+                centerY - SocketSizePoints / 2f,
+                SocketSizePoints,
+                SocketSizePoints);
+            socket.Name = MakeInsetName(boxId, "Anchor_" + tag);
+            socket.Fill.Visible = MsoTriState.msoFalse;
+            socket.Line.Visible = MsoTriState.msoFalse;
+            return socket;
+        }
+
+        private static PowerPoint.Shape CreateLine(PowerPoint.Slide slide,
+            PowerPoint.Shape box, PowerPoint.Shape inset,
+            string boxCorner, string insetCorner,
+            int boxId, int index, float weight, int colorRgb, Office.MsoLineDashStyle dash)
+        {
+            // 先用角点坐标创建直线，再用连接点粘附
+            (float bx, float by) = GetCorner(box, boxCorner);
+            (float ix, float iy) = GetCorner(inset, insetCorner);
+
+            PowerPoint.Shape line = slide.Shapes.AddConnector(
+                MsoConnectorType.msoConnectorStraight, bx, by, ix, iy);
+            line.Name = MakeInsetName(boxId, "Line" + index);
+            line.Line.ForeColor.RGB = colorRgb;
+            line.Line.Weight = weight;
+            try { line.Line.DashStyle = dash; } catch { }
+
+            // 粘附 begin → 选区框角（此时对侧端点仍位于 (ix, iy)，可直接作为已知点）
+            ConnectCorner(line, box, bx, by, ix, iy, isBegin: true);
+
+            // 反推 begin 实际吸附点，作为 end 校准的已知点
+            (float ax, float ay) = DeriveGluedPoint(line, ix, iy);
+            ConnectCorner(line, inset, ix, iy, ax, ay, isBegin: false);
+            return line;
+        }
+
+        /// <summary>
+        /// 直线连接器粘附一端后，其包围盒（Left/Top/Width/Height）即两端的包围盒。
+        /// 给定已知的另一端坐标，可反推出被粘附端点的实际坐标。
+        /// </summary>
+        private static (float x, float y) DeriveGluedPoint(PowerPoint.Shape connector,
+            float knownX, float knownY)
+        {
+            float L = connector.Left, T = connector.Top;
+            float R = L + connector.Width, B = T + connector.Height;
+            float x = Math.Abs(knownX - L) < Math.Abs(knownX - R) ? R : L;
+            float y = Math.Abs(knownY - T) < Math.Abs(knownY - B) ? B : T;
+            return (x, y);
+        }
+
+        /// <summary>
+        /// 把连线端点粘附到形状上「最靠近目标角点」的连接点。
+        /// 连接点索引因形状类型/PPT 版本而异，因此逐个试连，通过包围盒反推
+        /// 每个连接点的实际坐标，选择距离目标角点最近者作为最终粘附点。
+        /// 若形状没有连接点（ConnectionSiteCount &lt;= 0），保持绝对坐标不动。
+        /// </summary>
+        private static void ConnectCorner(PowerPoint.Shape connector, PowerPoint.Shape shape,
+            float targetX, float targetY, float knownX, float knownY, bool isBegin)
+        {
+            int siteCount = 0;
+            try { siteCount = shape.ConnectionSiteCount; } catch { }
+            if (siteCount <= 0) return; // 无连接点 → 保持绝对坐标
+
+            int bestSite = 1;
+            double bestDist = double.MaxValue;
+
+            for (int site = 1; site <= siteCount; site++)
+            {
+                try
+                {
+                    // 换连接点前先断开旧连接（从未连接过时忽略异常）
+                    if (isBegin)
+                    {
+                        try { connector.ConnectorFormat.BeginDisconnect(); } catch { }
+                        connector.ConnectorFormat.BeginConnect(shape, site);
+                    }
+                    else
+                    {
+                        try { connector.ConnectorFormat.EndDisconnect(); } catch { }
+                        connector.ConnectorFormat.EndConnect(shape, site);
+                    }
+
+                    float L = connector.Left, T = connector.Top;
+                    float R = L + connector.Width, B = T + connector.Height;
+                    float siteX = Math.Abs(knownX - L) < Math.Abs(knownX - R) ? R : L;
+                    float siteY = Math.Abs(knownY - T) < Math.Abs(knownY - B) ? B : T;
+
+                    double dx = siteX - targetX;
+                    double dy = siteY - targetY;
+                    double dist = dx * dx + dy * dy;
+                    if (dist < bestDist)
+                    {
+                        bestDist = dist;
+                        bestSite = site;
+                    }
+                }
+                catch { }
+            }
+
+            try
+            {
+                if (isBegin)
+                {
+                    try { connector.ConnectorFormat.BeginDisconnect(); } catch { }
+                    connector.ConnectorFormat.BeginConnect(shape, bestSite);
+                }
+                else
+                {
+                    try { connector.ConnectorFormat.EndDisconnect(); } catch { }
+                    connector.ConnectorFormat.EndConnect(shape, bestSite);
+                }
+            }
+            catch { }
         }
 
         private static string MakeInsetName(int boxShapeId, string suffix)
@@ -357,12 +507,11 @@ namespace SlideSCI
         }
 
         /// <summary>
-        /// 清理旧的放大图与连线：把包含生成物（选区框/放大图/连线）的编组逐层拆开，
-        /// 再删除所有放大图与连线成员，选区框保留。
+        /// 清理旧的生成物：把包含生成物的编组（外层组、放大图单元）逐层拆开，
+        /// 再删除所有放大图/锚点/连线成员，选区框保留。
         /// </summary>
         private static void CleanUpPreviousArtifacts(PowerPoint.Slide slide)
         {
-            // 逐层拆开包含生成物的顶层编组，直到顶层不再有生成物编组
             bool ungrouped = true;
             while (ungrouped)
             {
@@ -391,7 +540,6 @@ namespace SlideSCI
                 }
             }
 
-            // 删除放大图与连线（保留选区框）
             var toDelete = new List<PowerPoint.Shape>();
             foreach (PowerPoint.Shape shape in slide.Shapes)
             {

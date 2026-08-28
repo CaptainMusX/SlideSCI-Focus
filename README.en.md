@@ -1,147 +1,102 @@
 <div align="center">
 
-English | [简体中文](README.md)
+# SlideSCI
 
-<a href="https://hellogithub.com/repository/Achuan-2/SlideSCI" target="_blank"><img src="https://abroad.hellogithub.com/v1/widgets/recommend.svg?rid=54e09132ba0a40cf9ff6594320e6c6ba&claim_uid=k20NpB9znZ3v6h8" alt="Featured｜HelloGitHub" style="width: 250px; height: 54px;" width="250" height="54" /></a>
+**A PowerPoint add-in for scientific figure preparation** (VSTO, Windows)
+
 </div>
- 
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Achuan-2/SlideSCI&type=Date)](https://www.star-history.com/#Achuan-2/SlideSCI&Date)
+> This repository is a personal trimmed fork of [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI):
+> the AI assistant and shape-library sidebars were removed, a new "Magnified Inset" (zoom inset)
+> feature was added, plus stability hardening and an installer pipeline rewrite.
 
-Preview of Plugin Features
+## ✨ Features
 
-<img alt="PixPin_2025-08-29_15-10-51" src="https://s2.loli.net/2025/08/29/lRWKUwJCTjrk9ec.png" />
+### 🔍 Magnified Inset (journal figure style)
+Create the classic "zoom-in" panel used in Cell/Nature-style figures from microscopy/EM images:
 
-<img alt="PixPin_2025-08-29_15-11-12" src="https://s2.loli.net/2025/08/29/3dsS9UFtWL1niZx.png" />
+- **"Insert selection box"**: places a square selection box at the center of the selected image;
+  drag/resize it freely to frame the exact region to magnify
+- **"Generate magnified image"**: opens a settings dialog and generates the result in one click:
+  - Target size: same as original image / specified magnification factor / custom width (cm)
+  - Connector style: **journal funnel** (box bottom corners → inset top corners, parallel
+    non-corner lines) or **crossed X** (four corners crossed)
+  - Connector/frame line: color (including custom), weight, solid/dashed
+  - Live preview of the resulting dimensions and the effective magnification; warns when the
+    box aspect ratio does not match the target frame (stretch warning)
+- **Snapped connectors**: line endpoints are glued to the box corners and the inset corners
+  (via invisible corner anchors) using native PowerPoint connection points — moving the image
+  or the box later re-stretches the lines automatically, no manual rework
+- **Pixel-lossless**: only vector operations are used (duplicate, crop, scale, connect, group);
+  no file export, no image re-encoding — the original pixels stay untouched
+- Re-generating automatically replaces the old inset and lines while keeping your box
 
-## 🙏 Sponsors
+### 🖼️ Image tools
+- **Auto image arrangement**: 3 sort modes × 3 layout modes (column-width grid / uniform height /
+  waterfall), with per-row/column spacing and image width & height in cm
+- **Batch captions** for images (above/below, font/size/offset/centering/auto-group)
+- **Batch subfigure labels** (A, a, A), 1, Ⅰ, ① … 14 templates, offsets, bold, auto numbering)
+- **Export slide / export original image / copy large image**: batch high-DPI image & PDF export;
+  original images are read directly from the package (OpenXML) without quality loss
 
-| Sponsors | Description |
-| --- | --- |
-| ![17873186772188803ff9ca56b8aefe5fa96dcb51eb47d-20260821211408-jzsp68c.jpg](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed@pic/assets/17873186772188803ff9ca56b8aefe5fa96dcb51eb47d-20260821211408-jzsp68c.jpg) | Thanks to APIMart for sponsoring this project! APIMart is a low-cost API platform for AI image & video generation — GPT-Image-2 from $0.006/image, 160+ images per dollar. One async API covers both image and video: submit a task, get an ID, fetch results via polling or callback. Batch tens of thousands of images without timeouts, switch models without changing code. Pay-as-you-go with no monthly fee — [sign up here](https://go.apimart.ai/gh-slidesci) to get started. |
+### 📋 Format & layout
+- Copy/paste **shape format**, **text format** (font/color/size/effects), **group format**
+- Copy/paste **position** (9 anchor points, multi-select), **swap positions**
+- Copy/paste **width, height, picture crop** (multi-select)
+- **Vertical/horizontal center** relative to the first selected object (Illustrator-style),
+  and **spacing/distribution**
 
-## 📝 Development Background
+### 📝 Markdown / LaTeX / code
+- **Insert Markdown**: paste a whole note as slides in order — headings, lists (with hanging
+  indent), task lists, tables, block quotes, inline styles, inline & block math
+- **Textbox to rich text**: convert a textbox containing Markdown into rich text in place
+- **Insert LaTeX text**: native PowerPoint equations (OMML), good for simple formulas
+- **Insert LaTeX SVG**: MathJax-based conversion for complex formulas (requires Node.js, see below)
+- **Insert code block**: syntax highlighting for 8 languages (matlab/python/r/js/html/css/
+  csharp/fortran), black/white background toggle
 
-Does anyone else share my long-standing grievances with PowerPoint?  😡:
+## 🪟 Requirements
 
-💔 **No Image Titles**: Unlike Word, you can't directly add titles to images. You have to manually insert text boxes and struggle with alignment!
+- Windows + Microsoft PowerPoint (VSTO add-in)
+- WPS is installable but does not support Markdown/LaTeX insertion (may freeze)
+- macOS is not supported
 
-💔 **No Copy-Paste Element Positioning**: To keep similar elements in consistent positions across slides, you have to copy-paste and modify each time - no way to just copy-paste positions.
+## 📥 Installation
 
-💔 **No Auto-Align for Images**: Insert multiple images and want them neatly arranged? Either drag each one manually for eternity or align them column by column.
+1. Download the installer from the [Releases](https://github.com/CaptainMusX/SlideSCI/releases) page
+2. **Quit PowerPoint first**, then run the installer
+3. Dependencies: .NET Framework 4.7.2 and Microsoft Visual Studio 2010 Tools for Office Runtime
+   (the installer prompts automatically)
 
-💔 **No Code Block Insertion**: Have to copy-paste from external editors or screenshot code blocks - so tedious!
+> If the add-in does not appear: Developer → COM Add-ins → check `CaptainMusX.SlideSCI`.
+> If it reports "Unhandled error", install the runtime dependencies above and restart PowerPoint.
 
-💔 **No LaTeX Formula Support**: Now I mainly rely on AI to recognize/generate math formulas in LaTeX format, which can't be directly pasted to PPT...
+## 🔧 Development & build
 
-...
+- Visual Studio + Visual Studio Tools For Office; open `SlideSCI.sln`
+- Build the installer from the command line: `pwsh -File .\build\Build-Installer.ps1`
+  (see `build/README.md`)
+- For "Insert LaTeX SVG", a Node.js runtime is required:
+  ```
+  cd <addin-dir>/latex-converter
+  npm install
+  ```
+  or bundle MathJax into the installer with `-BundleLatexRuntime` (not bundled by default)
 
-Most PPT plugins are packed with flashy but impractical features. As a graduate student doing weekly research progress reports, I need to quickly insert content and make clear presentations - aesthetics are secondary.
+## ❓ FAQ
 
-With AI's help, I developed solutions to these pain points quickly! (Over 99% of this plugin's code was AI-generated. Thank you AI teacher!)
+- **Add buttons to the Quick Access Toolbar?** Right-click a button → Add to Quick Access Toolbar
+- **LaTeX renders incorrectly?** Use "Insert LaTeX text" for simple formulas and
+  "Insert LaTeX SVG" for complex ones
+- **Connectors no longer follow the image?** They are glued to the box and the inset corners;
+  if you deleted the selection box, re-insert it and regenerate
 
-In the spirit of open source, this plugin is publicly available on GitHub. Stars are appreciated!  🌟
+## 📄 License & notice
 
-GitHub: [https://github.com/Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI)
+- This fork is derived from [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI) (AGPL-3.0);
+  the original author's copyright and disclaimers remain in effect
+- For learning and scientific use only; commercial use is prohibited; use at your own risk
 
-##  ✨ Key Features
+## 💬 Feedback
 
-- **Batch Add Image Titles:** Supports batch selection of images to add centered captions below them. Allows configuring auto-grouping of images and captions.
-  <img alt="" src="https://s2.loli.net/2025/08/29/OoXlgpGdrtx2bEP.png" />
-
-- **Batch Add Image Labels:** For scientific figures, supports label templates (`A`, `a`, `A)`, `a)`, `1`, `1)`). Default label font is `Arial`.
-
-- **Auto-arrange Images:** Automatically aligns multiple images with configurable:
-  - Sorting: By position or selection order
-  - Layout: 
-    - Column-max-width (for tabular layouts in academic figures)
-    - Uniform height (uses first image's height by default)
-    - Uniform width (waterfall flow, uses first image's width by default)
-    - Custom spacing between columns/rows
-  <img alt="" src="https://s2.loli.net/2025/08/29/RmxjZpTzGDL8evP.png" />
-
-- **Copy-Paste Formatting:**
-  - Style copying for shapes/text
-  - Multi-element position copying (great for aligning elements across slides)
-  - Bulk dimension pasting for uniform image sizes
-  <img alt="" src="https://s2.loli.net/2025/08/29/q5vblI3nrDhewJ6.gif" />
-
-- **Insert Syntax-Highlighted Code Blocks:**
-  <img alt="" src="https://s2.loli.net/2025/08/29/jbSgDfnP69eZopV.png" />
-  - Supported languages: MATLAB, Python, R, JavaScript, HTML, CSS, C#
-  - Toggle between black/white background (default is black)
-
-- **Insert LaTeX Math Formulas:**
-  <img alt="" src="https://s2.loli.net/2025/08/29/qz9LMCuRB7AotDv.png" />
-
-- **Insert Markdown Text:**
-  <img alt="" src="https://s2.loli.net/2025/08/29/MPKOgWonijCsl4D.png" />
-  - Preserves all formatting when pasting complete markdown documents
-  - Inline formats: Bold, underline, superscript, subscript, italic, links, inline code/math
-  - Block formats: 
-    - Headings, lists (preserves hanging indents), code blocks (editable text boxes with syntax highlighting)
-    - Tables (limited to 500px width with 1pt black borders by default)
-    - Math formulas (editable text boxes)
-    - Blockquotes (text boxes with black borders)
-    - Task lists (converts to  ☑/☐ indicators)
-
-* **Batch Add Image Labels**: For scientific figures, choose label templates (`A`, `a`, `A)`, `a)`). Default font is `Arial`.
-    ![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/PixPin_2025-01-23_12-14-27-2025-01-23.png)
-
-## 🪟 Supported Environments
-
-- Developed on Windows 11 using [Visual Studio Tools for Office](https://www.visualstudio.com/vs/office-tools/) with C#
-- Designed for Microsoft PowerPoint
-- Compatible with WPS Office (Note: WPS version doesn't support LaTex formulas or Markdown insertion - may cause crashes)
-- Windows only (Mac unsupported due to different plugin architectures)
-
-## 🖥️ Installation
-
-1. Download the plugin's `.exe` installer from GitHub [Releases](https://github.com/Achuan-2/SlideSCI/releases)
-2. Double-click to install
-   
-Important:
-- Close PowerPoint before installation, otherwise the plugin won't load immediately
-
-Required Dependencies (usually prompted automatically during installation):
-1. [Microsoft .NET Framework 4.0+](https://www.microsoft.com/download/details.aspx?id=17718)
-2. [Microsoft Visual Studio 2010 Tools for Office Runtime](https://www.microsoft.com/download/details.aspx?id=105522)
-
-Troubleshooting:
-- If the plugin doesn't appear in PowerPoint or shows "Runtime error loading COM add-in", install the dependencies above
-
-## ❓ FAQs
-
-* **How to add plugin features to the Quick Access Toolbar?**  
-  Right-click a button and select "Add to Quick Access Toolbar."  
-  ![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/PixPin_2025-01-16_16-56-07-2025-01-16.png)  
-  Move the Quick Access Toolbar below the ribbon for easier access.
-
-* **LaTeX formulas display incorrectly?**  
-  Best for single-line formulas. For complex multi-line formulas, use [IguanaTex](https://github.com/Jonathan-LeRoux/IguanaTex).  
-  See examples of PPT-specific LaTeX syntax [here](https://github.com/Achuan-2/SlideSCI/issues/7).
-
-## ❤️ Support My Work
-
-If you like my plugin, please consider giving a star to the GitHub repository and making a donation. This will encourage me to continue improving this plugin.
-
-![](https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/20241118182532-2024-11-18.png)
-
-See the list of donors here: https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/20241128221208-2024-11-28.png
-
-
-## 👨‍💻 Feedback
-
-If you encounter any problems during use, you can provide feedback through the following ways:
-
-1. Submit an [Issue](https://github.com/Achuan-2/SlideSCI/issues) on GitHub
-2. Send an email to: achuan-2@outlook.com
-
-
-## 🔍 References & Acknowledgements
-
-* [jph00/latex-ppt](https://github.com/jph00/latex-ppt): LaTeX in PowerPoint support
-* [Markdig](https://github.com/xoofx/markdig): Markdown parsing support
-* Thanks to Visual Studio Tools For Office for providing development support
-* Thanks to the donors
-* Thanks to all users who provided suggestions and feedback
+- GitHub Issues: https://github.com/CaptainMusX/SlideSCI/issues
