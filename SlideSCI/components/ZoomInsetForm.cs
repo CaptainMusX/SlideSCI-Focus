@@ -1,17 +1,30 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 using Office = Microsoft.Office.Core;
 
 namespace SlideSCI
 {
     /// <summary>
-    /// 「生成放大图」参数对话框。
+    /// 「生成放大图」参数对话框（Apple 风格）。
     /// 选项通过属性暴露给调用方；尺寸计算由 ZoomInsetHelper.ComputeTargetSize 完成。
     /// 构造时传入当前选区框与原图尺寸（磅），用于实时预览放大图尺寸/放大倍数。
     /// </summary>
     public class ZoomInsetForm : Form
     {
+        // —— Apple 风格调色板 ——
+        private static readonly Color Accent = Color.FromArgb(0, 122, 255);        // iOS 蓝
+        private static readonly Color AccentHover = Color.FromArgb(0, 113, 227);
+        private static readonly Color TextPrimary = Color.FromArgb(29, 29, 31);    // #1D1D1F
+        private static readonly Color TextSecondary = Color.FromArgb(110, 110, 115); // #6E6E73
+        private static readonly Color WindowBackground = Color.FromArgb(245, 245, 247); // #F5F5F7
+        private static readonly Color CardBackground = Color.White;
+        private static readonly Color CardBorder = Color.FromArgb(229, 229, 234);  // #E5E5EA
+        private static readonly Color PreviewBackground = Color.FromArgb(242, 242, 247); // #F2F2F7
+        private static readonly Color ButtonBorder = Color.FromArgb(209, 209, 214); // #D1D1D6
+        private static readonly Color WarningColor = Color.FromArgb(255, 149, 0);  // iOS 橙
+
         private const int ColorBlack = 0x000000;
         private const int ColorWhite = 0xFFFFFF;
         private const int ColorRed = 0x0000FF;   // PPT RGB 实为 BGR
@@ -40,9 +53,6 @@ namespace SlideSCI
         private TextBox txtGap;
         private CheckBox chkGroup;
         private Label lblPreview;
-        private Button btnOk;
-        private Button btnCancel;
-
         private int customLineColorRgb = ColorRed;
         private int customBoxColorRgb = ColorRed;
 
@@ -64,31 +74,64 @@ namespace SlideSCI
             this.boxHeight = boxHeight;
             this.pictureWidth = pictureWidth;
             this.pictureHeight = pictureHeight;
-            InitializeComponent();
-            UpdatePreview();
-        }
 
-        private void InitializeComponent()
-        {
             this.Text = "生成局部放大图";
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.ClientSize = new Size(360, 512);
+            this.ClientSize = new Size(420, 584);
+            this.BackColor = WindowBackground;
+            this.Font = new Font("Segoe UI", 9f);
 
-            // —— 放大目标 ——
-            var groupTarget = new GroupBox { Text = "放大目标", Bounds = new Rectangle(12, 12, 336, 128) };
-            rbSameAsOriginal = new RadioButton
+            BuildLayout();
+            UpdatePreview();
+        }
+
+        private void BuildLayout()
+        {
+            const int margin = 24;
+            int contentWidth = ClientSize.Width - margin * 2; // 372
+            int y = 18;
+
+            // —— 标题区 ——
+            var title = new Label
             {
-                Text = "与原图相同尺寸",
-                Bounds = new Rectangle(16, 26, 300, 22),
-                Checked = true
+                Text = "生成局部放大图",
+                Font = new Font("Segoe UI Semibold", 14f, FontStyle.Bold),
+                ForeColor = TextPrimary,
+                Location = new Point(margin, y),
+                AutoSize = true
             };
-            rbMultiple = new RadioButton { Text = "指定放大倍数", Bounds = new Rectangle(16, 52, 140, 22) };
-            txtMagnification = new TextBox { Text = "2", Bounds = new Rectangle(160, 52, 56, 24), Enabled = false };
-            rbCustomWidth = new RadioButton { Text = "自定义宽度(cm)", Bounds = new Rectangle(16, 80, 140, 22) };
-            txtCustomWidth = new TextBox { Text = "10", Bounds = new Rectangle(160, 80, 56, 24), Enabled = false };
+            Controls.Add(title);
+            y += 28;
+
+            var subtitle = new Label
+            {
+                Text = "把选区框内的画面放大，并放置在原图下方",
+                Font = new Font("Segoe UI", 9f),
+                ForeColor = TextSecondary,
+                Location = new Point(margin, y),
+                AutoSize = true
+            };
+            Controls.Add(subtitle);
+            y += 28;
+
+            // —— 卡片一：放大目标 ——
+            var cardTarget = new RoundedPanel
+            {
+                Bounds = new Rectangle(margin, y, contentWidth, 136),
+                Padding = new Padding(16)
+            };
+            var lblTargetHeader = SectionHeader("放大目标");
+            lblTargetHeader.Location = new Point(4, 4);
+            cardTarget.Controls.Add(lblTargetHeader);
+
+            rbSameAsOriginal = MakeRadio("与原图相同尺寸", 4, 32, cardTarget, true);
+            rbMultiple = MakeRadio("指定放大倍数", 4, 62, cardTarget, false);
+            txtMagnification = MakeSmallInput("2", contentWidth - 16 - 64, 62, 64, cardTarget);
+            rbCustomWidth = MakeRadio("自定义宽度 (cm)", 4, 92, cardTarget, false);
+            txtCustomWidth = MakeSmallInput("10", contentWidth - 16 - 64, 92, 64, cardTarget);
 
             rbSameAsOriginal.CheckedChanged += (s, e) => { SyncInputsEnabled(); UpdatePreview(); };
             rbMultiple.CheckedChanged += (s, e) => { SyncInputsEnabled(); UpdatePreview(); };
@@ -96,122 +139,192 @@ namespace SlideSCI
             txtMagnification.TextChanged += (s, e) => UpdatePreview();
             txtCustomWidth.TextChanged += (s, e) => UpdatePreview();
 
-            groupTarget.Controls.Add(rbSameAsOriginal);
-            groupTarget.Controls.Add(rbMultiple);
-            groupTarget.Controls.Add(txtMagnification);
-            groupTarget.Controls.Add(rbCustomWidth);
-            groupTarget.Controls.Add(txtCustomWidth);
+            Controls.Add(cardTarget);
+            y += 136 + 12;
 
-            // —— 连线样式 ——
-            var groupLine = new GroupBox { Text = "框角连线样式", Bounds = new Rectangle(12, 150, 336, 96) };
-            rbJournalFunnel = new RadioButton
+            // —— 卡片二：框角连线样式 ——
+            var cardLines = new RoundedPanel
             {
-                Text = "期刊漏斗：框下两角 → 放大图上两角",
-                Bounds = new Rectangle(16, 24, 310, 36),
-                Checked = true
+                Bounds = new Rectangle(margin, y, contentWidth, 100),
+                Padding = new Padding(16)
             };
-            rbCrossedX = new RadioButton
-            {
-                Text = "交叉 X 形：四角交叉连线",
-                Bounds = new Rectangle(16, 60, 300, 22)
-            };
-            groupLine.Controls.Add(rbJournalFunnel);
-            groupLine.Controls.Add(rbCrossedX);
+            var lblLinesHeader = SectionHeader("框角连线样式");
+            lblLinesHeader.Location = new Point(4, 4);
+            cardLines.Controls.Add(lblLinesHeader);
+            rbJournalFunnel = MakeRadio("期刊漏斗：框下两角 → 放大图上两角", 4, 34, cardLines, true);
+            rbCrossedX = MakeRadio("交叉 X 形：四角交叉连线", 4, 64, cardLines, false);
+            Controls.Add(cardLines);
+            y += 100 + 12;
 
-            // —— 线宽 ——
-            var lblLineWeight = new Label { Text = "连线粗细(pt)", Bounds = new Rectangle(12, 258, 110, 24) };
-            cmbLineWeight = new ComboBox
-            {
-                Bounds = new Rectangle(130, 256, 64, 24),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            cmbLineWeight.Items.AddRange(new object[] { 0.5f, 1f, 1.5f, 2f });
-            cmbLineWeight.SelectedIndex = 1;
+            // —— 两列栅格行 ——
+            // 行1：连线粗细 | 框线粗细
+            cmbLineWeight = AddComboRow(y, "连线粗细 (pt)", new object[] { 0.5f, 1f, 1.5f, 2f }, 1);
+            cmbBoxLineWeight = AddComboRow2(y, "框线粗细 (pt)", new object[] { 1f, 1.5f, 2f, 3f }, 1);
+            y += 30;
 
-            var lblBoxWeight = new Label { Text = "框线粗细(pt)", Bounds = new Rectangle(210, 258, 100, 24) };
-            cmbBoxLineWeight = new ComboBox
-            {
-                Bounds = new Rectangle(300, 256, 48, 24),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            cmbBoxLineWeight.Items.AddRange(new object[] { 1f, 1.5f, 2f, 3f });
-            cmbBoxLineWeight.SelectedIndex = 1;
-
-            // —— 颜色 ——
-            var lblLineColor = new Label { Text = "连线颜色", Bounds = new Rectangle(12, 292, 100, 24) };
-            cmbLineColor = new ComboBox
-            {
-                Bounds = new Rectangle(120, 290, 96, 24),
-                DropDownStyle = ComboBoxStyle.DropDownList
-            };
-            cmbLineColor.Items.AddRange(new object[] { "黑色", "白色", "红色", "蓝色", "绿色", CustomItem });
-            cmbLineColor.SelectedIndex = 0;
+            // 行2：连线颜色 | 框线颜色
+            cmbLineColor = AddComboRow(y, "连线颜色", new object[] { "黑色", "白色", "红色", "蓝色", "绿色", CustomItem }, 0);
             cmbLineColor.SelectedIndexChanged += (s, e) => HandleColorSelection(cmbLineColor, ref customLineColorRgb);
+            cmbBoxColor = AddComboRow2(y, "框线颜色", new object[] { "黑色", "红色", "蓝色", "绿色" }, 0);
+            y += 30;
 
-            var lblBoxColor = new Label { Text = "框线颜色", Bounds = new Rectangle(230, 292, 80, 24) };
-            cmbBoxColor = new ComboBox
+            // 行3：连线线型 | 下边距
+            cmbLineDash = AddComboRow(y, "连线线型", new object[] { "实线", "虚线" }, 0);
+            var lblGap = new Label
             {
-                Bounds = new Rectangle(304, 290, 44, 24),
-                DropDownStyle = ComboBoxStyle.DropDownList
+                Text = "下边距 (cm)",
+                ForeColor = TextPrimary,
+                Location = new Point(200, y + 4),
+                AutoSize = true
             };
-            cmbBoxColor.Items.AddRange(new object[] { "黑色", "红色", "蓝色", "绿色" });
-            cmbBoxColor.SelectedIndex = 0;
-
-            // —— 线型 ——
-            var lblDash = new Label { Text = "连线线型", Bounds = new Rectangle(12, 326, 100, 24) };
-            cmbLineDash = new ComboBox
+            Controls.Add(lblGap);
+            txtGap = new TextBox
             {
-                Bounds = new Rectangle(120, 324, 96, 24),
-                DropDownStyle = ComboBoxStyle.DropDownList
+                Text = "0.5",
+                Bounds = new Rectangle(298, y, 64, 24),
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 9f)
             };
-            cmbLineDash.Items.AddRange(new object[] { "实线", "虚线" });
-            cmbLineDash.SelectedIndex = 0;
+            Controls.Add(txtGap);
+            y += 34;
 
-            // —— 下边距 ——
-            var lblGap = new Label { Text = "放大图下边距(cm)", Bounds = new Rectangle(12, 358, 130, 24) };
-            txtGap = new TextBox { Text = "0.5", Bounds = new Rectangle(150, 356, 56, 24) };
-
-            // —— 实时预览 ——
+            // —— 预览卡 ——
+            var previewCard = new RoundedPanel
+            {
+                Bounds = new Rectangle(margin, y, contentWidth, 66),
+                BackColor = PreviewBackground,
+                Padding = new Padding(14, 10, 14, 10)
+            };
             lblPreview = new Label
             {
-                Bounds = new Rectangle(12, 388, 336, 46),
-                ForeColor = Color.Gray,
+                ForeColor = TextSecondary,
+                Font = new Font("Segoe UI", 9f),
+                AutoSize = false,
+                Dock = DockStyle.Fill,
                 Text = ""
             };
+            previewCard.Controls.Add(lblPreview);
+            Controls.Add(previewCard);
+            y += 66 + 14;
 
+            // —— 编组开关 ——
             chkGroup = new CheckBox
             {
-                Text = "生成后自动编组（框+放大图+连线整体移动）",
-                Bounds = new Rectangle(12, 440, 320, 26),
+                Text = "生成后自动编组：框 + 放大图 + 连线组成一组，方便整体移动",
+                ForeColor = TextPrimary,
+                Location = new Point(margin, y),
+                AutoSize = true,
+                MaximumSize = new Size(contentWidth, 0),
                 Checked = true
             };
+            Controls.Add(chkGroup);
+            y += 30;
 
-            btnOk = new Button { Text = "生成", Bounds = new Rectangle(168, 472, 84, 30) };
-            btnOk.Click += (s, e) => { if (ValidateAndRead()) this.DialogResult = DialogResult.OK; };
-
-            btnCancel = new Button { Text = "取消", Bounds = new Rectangle(262, 472, 84, 30) };
+            // —— 底部按钮 ——
+            var btnCancel = new RoundedButton
+            {
+                Text = "取消",
+                Primary = false,
+                Font = new Font("Segoe UI", 9f),
+                Bounds = new Rectangle(420 - margin - 100 - 10, y, 100, 32)
+            };
             btnCancel.Click += (s, e) => this.DialogResult = DialogResult.Cancel;
 
-            this.Controls.Add(groupTarget);
-            this.Controls.Add(groupLine);
-            this.Controls.Add(lblLineWeight);
-            this.Controls.Add(cmbLineWeight);
-            this.Controls.Add(lblBoxWeight);
-            this.Controls.Add(cmbBoxLineWeight);
-            this.Controls.Add(lblLineColor);
-            this.Controls.Add(cmbLineColor);
-            this.Controls.Add(lblBoxColor);
-            this.Controls.Add(cmbBoxColor);
-            this.Controls.Add(lblDash);
-            this.Controls.Add(cmbLineDash);
-            this.Controls.Add(lblGap);
-            this.Controls.Add(txtGap);
-            this.Controls.Add(lblPreview);
-            this.Controls.Add(chkGroup);
-            this.Controls.Add(btnOk);
-            this.Controls.Add(btnCancel);
+            var btnOk = new RoundedButton
+            {
+                Text = "生成",
+                Primary = true,
+                Font = new Font("Segoe UI Semibold", 9.5f),
+                Bounds = new Rectangle(420 - margin - 100, y, 100, 32)
+            };
+            btnOk.Click += (s, e) => { if (ValidateAndRead()) this.DialogResult = DialogResult.OK; };
+
+            Controls.Add(btnCancel);
+            Controls.Add(btnOk);
             this.AcceptButton = btnOk;
             this.CancelButton = btnCancel;
+        }
+
+        private static Label SectionHeader(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                Font = new Font("Segoe UI Semibold", 10f, FontStyle.Bold),
+                ForeColor = TextPrimary,
+                AutoSize = true
+            };
+        }
+
+        private static RadioButton MakeRadio(string text, int x, int y, Control parent, bool checkedState)
+        {
+            var radio = new RadioButton
+            {
+                Text = text,
+                ForeColor = TextPrimary,
+                Font = new Font("Segoe UI", 9f),
+                Location = new Point(x, y),
+                AutoSize = true,
+                MaximumSize = new Size(parent.ClientSize.Width - 90, 0),
+                Checked = checkedState
+            };
+            parent.Controls.Add(radio);
+            return radio;
+        }
+
+        private static TextBox MakeSmallInput(string text, int x, int y, int width, Control parent)
+        {
+            var input = new TextBox
+            {
+                Text = text,
+                Bounds = new Rectangle(x, y, width, 24),
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 9f)
+            };
+            parent.Controls.Add(input);
+            return input;
+        }
+
+        private ComboBox AddComboRow(int y, string labelText, object[] items, int selectedIndex)
+        {
+            CurrentRowY = y;
+            AddGridLabel(labelText, 0);
+            return AddGridCombo(items, selectedIndex, 0, y);
+        }
+
+        private ComboBox AddComboRow2(int y, string labelText, object[] items, int selectedIndex)
+        {
+            CurrentRowY = y;
+            AddGridLabel(labelText, 1);
+            return AddGridCombo(items, selectedIndex, 1, y);
+        }
+
+        private void AddGridLabel(string text, int column)
+        {
+            Controls.Add(new Label
+            {
+                Text = text,
+                ForeColor = TextPrimary,
+                Location = new Point(column == 0 ? 24 : 200, CurrentRowY + 4),
+                AutoSize = true
+            });
+        }
+
+        private int CurrentRowY;
+
+        private ComboBox AddGridCombo(object[] items, int selectedIndex, int column, int y)
+        {
+            var combo = new ComboBox
+            {
+                Bounds = new Rectangle(column == 0 ? 118 : 298, y, 66, 24),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Font = new Font("Segoe UI", 9f),
+                FlatStyle = FlatStyle.Flat
+            };
+            combo.Items.AddRange(items);
+            combo.SelectedIndex = selectedIndex;
+            Controls.Add(combo);
+            return combo;
         }
 
         private void SyncInputsEnabled()
@@ -292,7 +405,7 @@ namespace SlideSCI
             }
 
             lblPreview.Text = text;
-            lblPreview.ForeColor = stretched ? Color.FromArgb(200, 120, 0) : Color.Gray;
+            lblPreview.ForeColor = stretched ? WarningColor : TextSecondary;
         }
 
         private static float PointsToCm(float points) => points / PointsPerCm;
@@ -341,6 +454,97 @@ namespace SlideSCI
                 : Office.MsoLineDashStyle.msoLineSolid;
             GroupEnabled = chkGroup.Checked;
             return true;
+        }
+
+        /// <summary>白色圆角卡片面板。</summary>
+        private sealed class RoundedPanel : Panel
+        {
+            public RoundedPanel()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+                BackColor = CardBackground;
+            }
+
+            protected override void OnPaintBackground(PaintEventArgs e) { }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                Graphics g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (GraphicsPath path = GetRoundedPath(new Rectangle(0, 0, Width - 1, Height - 1), 12))
+                using (var fill = new SolidBrush(BackColor))
+                using (var pen = new Pen(CardBorder))
+                {
+                    g.FillPath(fill, path);
+                    g.DrawPath(pen, path);
+                }
+            }
+
+            private static GraphicsPath GetRoundedPath(Rectangle bounds, int radius)
+            {
+                var path = new GraphicsPath();
+                int d = radius * 2;
+                path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
+                path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
+                path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+                path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
+                path.CloseFigure();
+                return path;
+            }
+        }
+
+        /// <summary>圆角按钮：主按钮为 iOS 蓝实心，次要按钮为白色描边。</summary>
+        private sealed class RoundedButton : Button
+        {
+            private bool hovered;
+
+            public bool Primary { get; set; } = true;
+
+            public RoundedButton()
+            {
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+                FlatStyle = FlatStyle.Flat;
+                FlatAppearance.BorderSize = 0;
+                Cursor = Cursors.Hand;
+            }
+
+            protected override void OnMouseEnter(EventArgs e) { hovered = true; Invalidate(); base.OnMouseEnter(e); }
+            protected override void OnMouseLeave(EventArgs e) { hovered = false; Invalidate(); base.OnMouseLeave(e); }
+
+            protected override void OnPaint(PaintEventArgs pevent)
+            {
+                Graphics g = pevent.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                var rect = new Rectangle(0, 0, Width - 1, Height - 1);
+                using (GraphicsPath path = GetRoundedPath(rect, 8))
+                {
+                    Color fill = Primary
+                        ? (hovered ? AccentHover : Accent)
+                        : (hovered ? Color.FromArgb(242, 242, 247) : Color.White);
+                    Color text = Primary ? Color.White : TextPrimary;
+
+                    using (var brush = new SolidBrush(fill)) g.FillPath(brush, path);
+                    if (!Primary)
+                    {
+                        using (var pen = new Pen(ButtonBorder)) g.DrawPath(pen, path);
+                    }
+
+                    TextRenderer.DrawText(g, Text, Font, rect, text,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                }
+            }
+
+            private static GraphicsPath GetRoundedPath(Rectangle bounds, int radius)
+            {
+                var path = new GraphicsPath();
+                int d = radius * 2;
+                path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
+                path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
+                path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+                path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
+                path.CloseFigure();
+                return path;
+            }
         }
     }
 }
