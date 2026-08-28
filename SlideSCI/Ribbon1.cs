@@ -6282,5 +6282,100 @@ namespace SlideSCI
             }
         }
 
+        /// <summary>步骤一：在选中的图片中心放置可自由拖动的方形选区框。</summary>
+        private void btnInsertZoomBox_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                if (!TryGetActiveSlide(out Slide slide))
+                {
+                    MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!PowerPointContext.TryGetActiveSelection(app, out Selection sel)
+                    || sel.Type != PpSelectionType.ppSelectionShapes
+                    || sel.ShapeRange.Count == 0)
+                {
+                    MessageBox.Show("请先选中一张图片。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                Shape picture = sel.ShapeRange[1];
+                if (!IsPictureShape(picture))
+                {
+                    MessageBox.Show("请先选中一张图片（当前选中对象不是图片）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!TryParseFloat(zoomBoxPercentCombo.Text, out float percent) || percent <= 0)
+                {
+                    percent = 40f;
+                }
+                percent = Math.Max(5f, Math.Min(90f, percent));
+
+                Shape box = ZoomInsetHelper.InsertZoomBox(slide, picture, percent);
+                SelectMultipleShapes(new List<Shape> { box });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"插入选区框失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
+
+        /// <summary>步骤二：参数对话框 → 生成放大图与连线（可反复重新生成覆盖旧结果）。</summary>
+        private void btnGenerateZoomInset_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                if (!TryGetActiveSlide(out Slide slide))
+                {
+                    MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                Shape box = ZoomInsetHelper.FindZoomBox(slide);
+                if (box == null)
+                {
+                    MessageBox.Show("未找到选区框。请先选中图片并点击「插入选区框」。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                Shape picture = ZoomInsetHelper.FindSourcePicture(slide, box);
+                if (picture == null)
+                {
+                    MessageBox.Show("未找到与选区框对应的原图（原图可能已被删除）。请重新插入选区框。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                using (var dialog = new ZoomInsetForm())
+                {
+                    if (dialog.ShowDialog() != DialogResult.OK) return;
+
+                    ZoomInsetHelper.ComputeTargetSize(picture, box, dialog.TargetMode,
+                        dialog.Magnification, dialog.CustomWidthCm,
+                        out float targetWidth, out float targetHeight);
+
+                    ZoomInsetResult result = ZoomInsetHelper.GenerateZoomInset(
+                        slide, box, picture,
+                        targetWidth, targetHeight,
+                        ZoomInsetHelper.CmToPoints(dialog.GapCm),
+                        dialog.LineStyle,
+                        dialog.LineWeight,
+                        dialog.BoxLineWeight,
+                        dialog.GroupEnabled,
+                        app);
+
+                    if (!result.Ok)
+                    {
+                        MessageBox.Show(result.Error ?? "生成失败。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"生成放大图失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
 }

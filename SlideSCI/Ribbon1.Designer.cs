@@ -111,6 +111,7 @@ namespace SlideSCI
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Ribbon1));
             this.tab2 = this.Factory.CreateRibbonTab();
             this.图片自动对齐 = this.Factory.CreateRibbonGroup();
+            this.zoomGroup = this.Factory.CreateRibbonGroup();
             this.imgAutoAlignSortTypeDropDown = this.Factory.CreateRibbonDropDown();
             this.imgAutoAlignAlignTypeDropDown = this.Factory.CreateRibbonDropDown();
             this.excludeTextcheckBox = this.Factory.CreateRibbonCheckBox();
@@ -119,6 +120,9 @@ namespace SlideSCI
             this.imgAutoAlign_rowSpace = this.Factory.CreateRibbonComboBox();
             this.imgWidthEditBpx = this.Factory.CreateRibbonComboBox();
             this.imgHeightEditBox = this.Factory.CreateRibbonComboBox();
+            this.btnInsertZoomBox = this.Factory.CreateRibbonButton();
+            this.btnGenerateZoomInset = this.Factory.CreateRibbonButton();
+            this.zoomBoxPercentCombo = this.Factory.CreateRibbonComboBox();
             this.图片处理 = this.Factory.CreateRibbonGroup();
             this.fontNameEditBox = this.Factory.CreateRibbonComboBox();
             this.fontSizeEditBox = this.Factory.CreateRibbonComboBox();
@@ -212,6 +216,7 @@ namespace SlideSCI
             this.button5 = this.Factory.CreateRibbonButton();
             this.tab2.SuspendLayout();
             this.图片自动对齐.SuspendLayout();
+            this.zoomGroup.SuspendLayout();
             this.图片处理.SuspendLayout();
             this.group1.SuspendLayout();
             this.group3.SuspendLayout();
@@ -225,6 +230,7 @@ namespace SlideSCI
             // tab2
             // 
             this.tab2.Groups.Add(this.图片自动对齐);
+            this.tab2.Groups.Add(this.zoomGroup);
             this.tab2.Groups.Add(this.图片处理);
             this.tab2.Groups.Add(this.group1);
             this.tab2.Groups.Add(this.group3);
@@ -427,6 +433,37 @@ namespace SlideSCI
             this.imgHeightEditBox.ScreenTip = "统一设置图片高度cm";
             this.imgHeightEditBox.Text = null;
             this.imgHeightEditBox.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgHeightEditBox_TextChanged);
+            // 
+            // zoomGroup
+            // 
+            this.zoomGroup.Items.Add(this.btnInsertZoomBox);
+            this.zoomGroup.Items.Add(this.btnGenerateZoomInset);
+            this.zoomGroup.Items.Add(this.zoomBoxPercentCombo);
+            this.zoomGroup.Label = "局部放大";
+            this.zoomGroup.Name = "zoomGroup";
+            // 
+            // btnInsertZoomBox
+            // 
+            this.btnInsertZoomBox.Label = "插入选区框";
+            this.btnInsertZoomBox.Name = "btnInsertZoomBox";
+            this.btnInsertZoomBox.ScreenTip = "在选中的图片中心放置方形选区框，可拖动调整";
+            this.btnInsertZoomBox.SuperTip = "1. 选中图片\n2. 点击「插入选区框」\n3. 拖动/缩放选区框到目标区域\n4. 点击「生成放大图」";
+            this.btnInsertZoomBox.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnInsertZoomBox_Click);
+            // 
+            // btnGenerateZoomInset
+            // 
+            this.btnGenerateZoomInset.Label = "生成放大图";
+            this.btnGenerateZoomInset.Name = "btnGenerateZoomInset";
+            this.btnGenerateZoomInset.ScreenTip = "把选区框内区域放大到目标尺寸，并用细线连接框角与放大图";
+            this.btnGenerateZoomInset.SuperTip = "弹出参数对话框：目标尺寸（与原图相同/指定倍数/自定义宽度）、边距、连线样式与粗细、是否编组。\n重复生成会先清除旧放大图与连线。";
+            this.btnGenerateZoomInset.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnGenerateZoomInset_Click);
+            // 
+            // zoomBoxPercentCombo
+            // 
+            this.zoomBoxPercentCombo.Label = "选区宽%";
+            this.zoomBoxPercentCombo.Name = "zoomBoxPercentCombo";
+            this.zoomBoxPercentCombo.Text = "40";
+            this.zoomBoxPercentCombo.ScreenTip = "选区框边长占图片宽度的百分比（5–90）";
             // 
             // 图片处理
             // 
@@ -1209,6 +1246,8 @@ namespace SlideSCI
             this.tab2.PerformLayout();
             this.图片自动对齐.ResumeLayout(false);
             this.图片自动对齐.PerformLayout();
+            this.zoomGroup.ResumeLayout(false);
+            this.zoomGroup.PerformLayout();
             this.图片处理.ResumeLayout(false);
             this.图片处理.PerformLayout();
             this.group1.ResumeLayout(false);
@@ -1255,6 +1294,10 @@ namespace SlideSCI
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox labelFontNameEditBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox imgWidthEditBpx;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox imgHeightEditBox;
+        internal Microsoft.Office.Tools.Ribbon.RibbonGroup zoomGroup;
+        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnInsertZoomBox;
+        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnGenerateZoomInset;
+        internal Microsoft.Office.Tools.Ribbon.RibbonComboBox zoomBoxPercentCombo;
         internal Microsoft.Office.Tools.Ribbon.RibbonEditBox labelOffsetYEditBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonEditBox labelOffsetXEditBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton exportImageButton; // 添加按钮声明
