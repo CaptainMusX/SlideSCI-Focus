@@ -6282,32 +6282,5 @@ namespace SlideSCI
             }
         }
 
-        private void btnShapeLibrary_Click(object sender, Microsoft.Office.Tools.Ribbon.RibbonControlEventArgs e)
-        {
-            Microsoft.Office.Interop.PowerPoint.DocumentWindow contextWindow = null;
-            try
-            {
-                if (e.Control != null && e.Control.Context != null)
-                {
-                    contextWindow = e.Control.Context as Microsoft.Office.Interop.PowerPoint.DocumentWindow;
-                }
-            }
-            catch { }
-            Globals.ThisAddIn.ToggleShapeLibraryTaskPane(contextWindow);
         }
-
-        private void btnAISidebar_Click(object sender, Microsoft.Office.Tools.Ribbon.RibbonControlEventArgs e)
-        {
-            Microsoft.Office.Interop.PowerPoint.DocumentWindow contextWindow = null;
-            try
-            {
-                if (e.Control != null && e.Control.Context != null)
-                {
-                    contextWindow = e.Control.Context as Microsoft.Office.Interop.PowerPoint.DocumentWindow;
-                }
-            }
-            catch { }
-            Globals.ThisAddIn.ToggleAISidebarTaskPane(contextWindow);
-        }
-    }
 }

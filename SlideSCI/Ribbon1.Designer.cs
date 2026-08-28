@@ -136,7 +136,6 @@ namespace SlideSCI
             this.labelIndex = this.Factory.CreateRibbonEditBox();
             this.labelIndexUpdatecheckBox = this.Factory.CreateRibbonCheckBox();
             this.group3 = this.Factory.CreateRibbonGroup();
-            this.shapeLibraryGroup = this.Factory.CreateRibbonGroup();
             this.tab1 = this.Factory.CreateRibbonTab();
             this.复制图片格式 = this.Factory.CreateRibbonGroup();
             this.separator6 = this.Factory.CreateRibbonSeparator();
@@ -159,8 +158,6 @@ namespace SlideSCI
             this.复制大图 = this.Factory.CreateRibbonButton();
             this.button1 = this.Factory.CreateRibbonButton();
             this.selectAllTextBoxesButton = this.Factory.CreateRibbonButton();
-            this.btnShapeLibrary = this.Factory.CreateRibbonButton();
-            this.btnAISidebar = this.Factory.CreateRibbonButton();
             this.copyShapeStyle = this.Factory.CreateRibbonSplitButton();
             this.copyShapeStyleAll = this.Factory.CreateRibbonButton();
             this.copyShapeStyleFill = this.Factory.CreateRibbonButton();
@@ -218,7 +215,6 @@ namespace SlideSCI
             this.图片处理.SuspendLayout();
             this.group1.SuspendLayout();
             this.group3.SuspendLayout();
-            this.shapeLibraryGroup.SuspendLayout();
             this.tab1.SuspendLayout();
             this.复制图片格式.SuspendLayout();
             this.排列.SuspendLayout();
@@ -232,7 +228,6 @@ namespace SlideSCI
             this.tab2.Groups.Add(this.图片处理);
             this.tab2.Groups.Add(this.group1);
             this.tab2.Groups.Add(this.group3);
-            this.tab2.Groups.Add(this.shapeLibraryGroup);
             this.tab2.Label = "SlideSCI";
             this.tab2.Name = "tab2";
             // 
@@ -583,13 +578,6 @@ namespace SlideSCI
             this.group3.Label = "其他";
             this.group3.Name = "group3";
             // 
-            // shapeLibraryGroup
-            // 
-            this.shapeLibraryGroup.Items.Add(this.btnShapeLibrary);
-            this.shapeLibraryGroup.Items.Add(this.btnAISidebar);
-            this.shapeLibraryGroup.Label = "侧边栏";
-            this.shapeLibraryGroup.Name = "shapeLibraryGroup";
-            // 
             // tab1
             // 
             this.tab1.Groups.Add(this.复制图片格式);
@@ -765,28 +753,6 @@ namespace SlideSCI
             this.selectAllTextBoxesButton.ScreenTip = "全选当前幻灯片上的所有文本框";
             this.selectAllTextBoxesButton.ShowImage = true;
             this.selectAllTextBoxesButton.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.selectAllTextBoxesButton_Click);
-            // 
-            // btnShapeLibrary
-            // 
-            this.btnShapeLibrary.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
-            this.btnShapeLibrary.Image = ((System.Drawing.Image)(resources.GetObject("btnShapeLibrary.Image")));
-            this.btnShapeLibrary.Label = "素材库";
-            this.btnShapeLibrary.Name = "btnShapeLibrary";
-            this.btnShapeLibrary.OfficeImageId = "OrganizerTaskPane";
-            this.btnShapeLibrary.ScreenTip = "打开PPT素材库，支持保存、预览 and 便捷插入形状";
-            this.btnShapeLibrary.ShowImage = true;
-            this.btnShapeLibrary.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnShapeLibrary_Click);
-            // 
-            // btnAISidebar
-            // 
-            this.btnAISidebar.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
-            this.btnAISidebar.Image = ((System.Drawing.Image)(resources.GetObject("btnAISidebar.Image")));
-            this.btnAISidebar.Label = "AI 助手";
-            this.btnAISidebar.Name = "btnAISidebar";
-            this.btnAISidebar.OfficeImageId = "Brainstorming";
-            this.btnAISidebar.ScreenTip = "与 AI 助手交流，支持执行 PowerPoint 自动化操作";
-            this.btnAISidebar.ShowImage = true;
-            this.btnAISidebar.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnAISidebar_Click);
             // 
             // copyShapeStyle
             // 
@@ -1249,8 +1215,6 @@ namespace SlideSCI
             this.group1.PerformLayout();
             this.group3.ResumeLayout(false);
             this.group3.PerformLayout();
-            this.shapeLibraryGroup.ResumeLayout(false);
-            this.shapeLibraryGroup.PerformLayout();
             this.tab1.ResumeLayout(false);
             this.tab1.PerformLayout();
             this.复制图片格式.ResumeLayout(false);
@@ -1367,9 +1331,6 @@ namespace SlideSCI
         internal Microsoft.Office.Tools.Ribbon.RibbonButton button8;
         internal Microsoft.Office.Tools.Ribbon.RibbonSeparator separator5;
         internal Microsoft.Office.Tools.Ribbon.RibbonSeparator separator6;
-        internal Microsoft.Office.Tools.Ribbon.RibbonGroup shapeLibraryGroup;
-        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnShapeLibrary;
-        internal Microsoft.Office.Tools.Ribbon.RibbonButton btnAISidebar;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup 排列;
     }
 
