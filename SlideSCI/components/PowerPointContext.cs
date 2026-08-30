@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Windows.Forms;
 using PowerPoint = Microsoft.Office.Interop.PowerPoint;
 
 namespace SlideSCI
@@ -69,6 +70,28 @@ namespace SlideSCI
             catch
             {
                 // COM cleanup must never mask the original operation result.
+            }
+        }
+
+        internal static IWin32Window GetDialogOwner(PowerPoint.Application application)
+        {
+            try
+            {
+                return application == null ? null : new WindowHandle(new IntPtr(application.HWND));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private sealed class WindowHandle : IWin32Window
+        {
+            public IntPtr Handle { get; }
+
+            internal WindowHandle(IntPtr handle)
+            {
+                Handle = handle;
             }
         }
     }

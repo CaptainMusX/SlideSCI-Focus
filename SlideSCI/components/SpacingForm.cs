@@ -66,10 +66,9 @@ namespace SlideSCI
             this.Text = "对齐间距设置";
             this.ClientSize = new Size(304, 395); // Client size increased to fit stacked buttons
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.FormBorderStyle = FormBorderStyle.FixedToolWindow;
-            this.TopMost = true;
-            this.BackColor = Color.FromArgb(240, 242, 245); // Fluent light gray
-            this.Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.TopMost = false;
+            ScientificUiTheme.ConfigureDialog(this);
             this.ShowIcon = false;
             this.ShowInTaskbar = false;
 
@@ -78,8 +77,8 @@ namespace SlideSCI
             {
                 Location = new Point(15, 15),
                 AutoSize = true, // Auto-size to prevent clipping
-                ForeColor = Color.FromArgb(64, 64, 64),
-                Font = new Font("Microsoft YaHei", 9F, FontStyle.Bold),
+                ForeColor = ScientificUiTheme.TextPrimary,
+                Font = ScientificUiTheme.ChineseBodyFont(9F, FontStyle.Bold),
                 Text = "正在读取当前选中的形状..."
             };
             this.Controls.Add(lblInfo);
@@ -89,7 +88,7 @@ namespace SlideSCI
             {
                 Location = new Point(15, 53),
                 Size = new Size(274, 90),
-                BackColor = Color.White
+                BackColor = ScientificUiTheme.Surface
             };
             cardDistribute.Paint += DrawCardBorder;
             this.Controls.Add(cardDistribute);
@@ -101,10 +100,10 @@ namespace SlideSCI
                 Height = 32,
                 Location = new Point(10, 10),
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(243, 243, 243),
-                ForeColor = Color.FromArgb(51, 51, 51),
+                BackColor = ScientificUiTheme.SurfaceMuted,
+                ForeColor = ScientificUiTheme.TextPrimary,
                 Cursor = Cursors.Hand,
-                Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular)
+                Font = ScientificUiTheme.ChineseBodyFont(9F)
             };
             btnDistributeH.FlatAppearance.BorderSize = 1;
             btnDistributeH.FlatAppearance.BorderColor = Color.FromArgb(220, 220, 220);
@@ -119,10 +118,10 @@ namespace SlideSCI
                 Height = 32,
                 Location = new Point(10, 48), // Stacked below H button
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(243, 243, 243),
-                ForeColor = Color.FromArgb(51, 51, 51),
+                BackColor = ScientificUiTheme.SurfaceMuted,
+                ForeColor = ScientificUiTheme.TextPrimary,
                 Cursor = Cursors.Hand,
-                Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular)
+                Font = ScientificUiTheme.ChineseBodyFont(9F)
             };
             btnDistributeV.FlatAppearance.BorderSize = 1;
             btnDistributeV.FlatAppearance.BorderColor = Color.FromArgb(220, 220, 220);
@@ -135,7 +134,7 @@ namespace SlideSCI
             {
                 Location = new Point(15, 153),
                 Size = new Size(274, 85),
-                BackColor = Color.White
+                BackColor = ScientificUiTheme.Surface
             };
             cardHorizontal.Paint += DrawCardBorder;
             this.Controls.Add(cardHorizontal);
@@ -146,7 +145,7 @@ namespace SlideSCI
                 Location = new Point(12, 12),
                 Size = new Size(150, 20),
                 Font = new Font("Microsoft YaHei", 9F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(205, 74, 38) // PowerPoint Accent color
+                ForeColor = ScientificUiTheme.Primary
             };
             cardHorizontal.Controls.Add(lblHorizontal);
 
@@ -191,7 +190,7 @@ namespace SlideSCI
                 Location = new Point(12, 12),
                 Size = new Size(150, 20),
                 Font = new Font("Microsoft YaHei", 9F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(205, 74, 38)
+                ForeColor = ScientificUiTheme.Primary
             };
             cardVertical.Controls.Add(lblVertical);
 
@@ -228,8 +227,8 @@ namespace SlideSCI
                 Height = 32,
                 Location = new Point(112, 348), // Centered horizontally
                 FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(224, 224, 224),
-                ForeColor = Color.FromArgb(51, 51, 51),
+                BackColor = ScientificUiTheme.SurfaceMuted,
+                ForeColor = ScientificUiTheme.TextPrimary,
                 Cursor = Cursors.Hand
             };
             btnClose.FlatAppearance.BorderSize = 0;
@@ -243,7 +242,7 @@ namespace SlideSCI
             Panel panel = sender as Panel;
             if (panel != null)
             {
-                using (Pen pen = new Pen(Color.FromArgb(224, 224, 224), 1))
+                using (Pen pen = new Pen(ScientificUiTheme.Border, 1))
                 {
                     e.Graphics.DrawRectangle(pen, 0, 0, panel.Width - 1, panel.Height - 1);
                 }

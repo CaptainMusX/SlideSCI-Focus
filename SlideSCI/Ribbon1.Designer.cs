@@ -234,7 +234,7 @@ namespace SlideSCI
             this.tab2.Groups.Add(this.图片处理);
             this.tab2.Groups.Add(this.group1);
             this.tab2.Groups.Add(this.group3);
-            this.tab2.Label = "SlideSCI";
+            this.tab2.Label = "SlideSCI Figure";
             this.tab2.Name = "tab2";
             // 
             // 图片自动对齐
@@ -444,23 +444,29 @@ namespace SlideSCI
             // 
             // btnInsertZoomBox
             // 
+            this.btnInsertZoomBox.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
             this.btnInsertZoomBox.Label = "插入选区框";
             this.btnInsertZoomBox.Name = "btnInsertZoomBox";
-            this.btnInsertZoomBox.ScreenTip = "在选中的图片中心放置方形选区框，可拖动调整";
-            this.btnInsertZoomBox.SuperTip = "1. 选中图片\n2. 点击「插入选区框」\n3. 拖动/缩放选区框到目标区域\n4. 点击「生成放大图」";
+            this.btnInsertZoomBox.OfficeImageId = "PictureCrop";
+            this.btnInsertZoomBox.ScreenTip = "为选中的图片添加局部放大选区";
+            this.btnInsertZoomBox.ShowImage = true;
+            this.btnInsertZoomBox.SuperTip = "选中一张图片后插入选区框。可在同一页创建多个选区，拖动或缩放到需要强调的区域。";
             this.btnInsertZoomBox.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnInsertZoomBox_Click);
             // 
             // btnGenerateZoomInset
             // 
+            this.btnGenerateZoomInset.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
             this.btnGenerateZoomInset.Label = "生成放大图";
             this.btnGenerateZoomInset.Name = "btnGenerateZoomInset";
-            this.btnGenerateZoomInset.ScreenTip = "把选区框内区域放大到目标尺寸，并用细线连接框角与放大图";
-            this.btnGenerateZoomInset.SuperTip = "弹出参数对话框：目标尺寸（与原图相同/指定倍数/自定义宽度）、边距、连线样式与粗细、是否编组。\n重复生成会先清除旧放大图与连线。";
+            this.btnGenerateZoomInset.OfficeImageId = "ZoomIn";
+            this.btnGenerateZoomInset.ScreenTip = "精确裁剪并生成期刊风格放大图（Ctrl+单击打开设置）";
+            this.btnGenerateZoomInset.ShowImage = true;
+            this.btnGenerateZoomInset.SuperTip = "单击：按上次设置直接生成/更新当前选区（不弹窗）\nCtrl+单击：打开「局部放大设置」调整尺寸、引线、颜色与间距\n同一页有多个选区时，请先选中要更新的选区框或放大图组。";
             this.btnGenerateZoomInset.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnGenerateZoomInset_Click);
             // 
             // zoomBoxPercentCombo
             // 
-            this.zoomBoxPercentCombo.Label = "选区宽%";
+            this.zoomBoxPercentCombo.Label = "选区大小%";
             this.zoomBoxPercentCombo.Name = "zoomBoxPercentCombo";
             this.zoomBoxPercentCombo.Text = "40";
             this.zoomBoxPercentCombo.ScreenTip = "选区框边长占图片宽度的百分比（5–90）";
@@ -612,7 +618,7 @@ namespace SlideSCI
             this.group3.Items.Add(this.复制大图);
             this.group3.Items.Add(this.button1);
             this.group3.Items.Add(this.selectAllTextBoxesButton);
-            this.group3.Label = "其他";
+            this.group3.Label = "导出与选择";
             this.group3.Name = "group3";
             // 
             // tab1
@@ -621,7 +627,7 @@ namespace SlideSCI
             this.tab1.Groups.Add(this.排列);
             this.tab1.Groups.Add(this.codeGroup);
             this.tab1.Groups.Add(this.group2);
-            this.tab1.Label = "SlideSCI(2)";
+            this.tab1.Label = "SlideSCI 工具";
             this.tab1.Name = "tab1";
             // 
             // 复制图片格式
@@ -690,7 +696,7 @@ namespace SlideSCI
             this.codeGroup.Items.Add(this.button8);
             this.codeGroup.Items.Add(this.insertCodeBlockButton);
             this.codeGroup.Items.Add(this.toggleBackgroundCheckBox);
-            this.codeGroup.Label = "Markdown";
+            this.codeGroup.Label = "科研文本";
             this.codeGroup.Name = "codeGroup";
             // 
             // toggleBackgroundCheckBox

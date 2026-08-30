@@ -6295,9 +6295,10 @@ namespace SlideSCI
 
                 if (!PowerPointContext.TryGetActiveSelection(app, out Selection sel)
                     || sel.Type != PpSelectionType.ppSelectionShapes
-                    || sel.ShapeRange.Count == 0)
+                    || sel.ShapeRange.Count != 1)
                 {
-                    MessageBox.Show("请先选中一张图片。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show("请只选中一张要添加局部放大的图片。", "局部放大",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
 
@@ -6314,6 +6315,7 @@ namespace SlideSCI
                 }
                 percent = Math.Max(5f, Math.Min(90f, percent));
 
+                try { app.StartNewUndoEntry(); } catch { }
                 Shape box = ZoomInsetHelper.InsertZoomBox(slide, picture, percent);
                 SelectMultipleShapes(new List<Shape> { box });
             }
@@ -6323,21 +6325,28 @@ namespace SlideSCI
             }
         }
 
-        /// <summary>步骤二：参数对话框 → 生成放大图与连线（可反复重新生成覆盖旧结果）。</summary>
+        /// <summary>
+        /// 步骤二：生成放大图。
+        /// 单击 = 按上次保存的设置直接生成/更新当前选区（首次使用时自动打开设置）；
+        /// Ctrl+单击 = 打开「局部放大设置」对话框，调整后生成并记住设置。
+        /// </summary>
         private void btnGenerateZoomInset_Click(object sender, RibbonControlEventArgs e)
         {
             try
             {
+                bool openSettings = (Control.ModifierKeys & Keys.Control) != 0;
+
                 if (!TryGetActiveSlide(out Slide slide))
                 {
                     MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 
-                Shape box = ZoomInsetHelper.FindZoomBox(slide);
-                if (box == null)
+                PowerPointContext.TryGetActiveSelection(app, out Selection selection);
+                if (!ZoomInsetHelper.TryResolveZoomBox(slide, selection, out Shape box, out string resolveError))
                 {
-                    MessageBox.Show("未找到选区框。请先选中图片并点击「插入选区框」。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(resolveError, "局部放大",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
 
@@ -6348,37 +6357,75 @@ namespace SlideSCI
                     return;
                 }
 
-                using (var dialog = new ZoomInsetForm(box.Width, box.Height, picture.Width, picture.Height))
+                ZoomSettings settings = ZoomSettings.LoadOrDefault();
+                if (openSettings || !ZoomSettings.HasSavedSettings())
                 {
-                    if (dialog.ShowDialog() != DialogResult.OK) return;
-
-                    ZoomInsetHelper.ComputeTargetSize(picture, box, dialog.TargetMode,
-                        dialog.Magnification, dialog.CustomWidthCm,
-                        out float targetWidth, out float targetHeight);
-
-                    ZoomInsetResult result = ZoomInsetHelper.GenerateZoomInset(
-                        slide, box, picture,
-                        targetWidth, targetHeight,
-                        ZoomInsetHelper.CmToPoints(dialog.GapCm),
-                        dialog.LineStyle,
-                        dialog.LineWeight,
-                        dialog.BoxLineWeight,
-                        dialog.LineColorRgb,
-                        dialog.BoxColorRgb,
-                        dialog.LineDashStyle,
-                        dialog.GroupEnabled,
-                        app);
-
-                    if (!result.Ok)
+                    using (var dialog = new ZoomInsetForm(box.Width, box.Height, picture.Width, picture.Height, settings))
                     {
-                        MessageBox.Show(result.Error ?? "生成失败。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        IWin32Window owner = PowerPointContext.GetDialogOwner(app);
+                        DialogResult dialogResult = owner == null
+                            ? dialog.ShowDialog()
+                            : dialog.ShowDialog(owner);
+                        if (dialogResult != DialogResult.OK) return;
+
+                        settings = new ZoomSettings
+                        {
+                            TargetMode = dialog.TargetMode,
+                            Magnification = dialog.Magnification,
+                            CustomWidthCm = dialog.CustomWidthCm,
+                            GapCm = dialog.GapCm,
+                            LineStyle = dialog.LineStyle,
+                            LineWeight = dialog.LineWeight,
+                            BoxLineWeight = dialog.BoxLineWeight,
+                            LineColorRgb = dialog.LineColorRgb,
+                            BoxColorRgb = dialog.BoxColorRgb,
+                            LineDash = dialog.LineDashStyle == Office.MsoLineDashStyle.msoLineDash ? 1 : 0,
+                            Group = dialog.GroupEnabled
+                        };
+                        ZoomSettings.Save(settings);
                     }
+                }
+
+                try { app.StartNewUndoEntry(); } catch { }
+                ZoomInsetResult result = ApplyZoomSettings(slide, box, picture, settings, app);
+
+                if (!result.Ok)
+                {
+                    MessageBox.Show(result.Error ?? "生成失败。", "局部放大",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else if (!string.IsNullOrWhiteSpace(result.Warning))
+                {
+                    MessageBox.Show(result.Warning, "局部放大已生成",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"生成放大图失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        /// <summary>按已保存设置计算目标尺寸并生成放大图。</summary>
+        private static ZoomInsetResult ApplyZoomSettings(Slide slide, Shape box, Shape picture,
+            ZoomSettings settings, PowerPoint.Application app)
+        {
+            ZoomInsetHelper.ComputeTargetSize(picture, box, settings.TargetMode,
+                settings.Magnification, settings.CustomWidthCm,
+                out float targetWidth, out float targetHeight);
+
+            return ZoomInsetHelper.GenerateZoomInset(
+                slide, box, picture,
+                targetWidth, targetHeight,
+                ZoomInsetHelper.CmToPoints(settings.GapCm),
+                settings.LineStyle,
+                settings.LineWeight,
+                settings.BoxLineWeight,
+                settings.LineColorRgb,
+                settings.BoxColorRgb,
+                settings.LineDash == 1 ? Office.MsoLineDashStyle.msoLineDash : Office.MsoLineDashStyle.msoLineSolid,
+                settings.Group,
+                app);
         }
     }
 }

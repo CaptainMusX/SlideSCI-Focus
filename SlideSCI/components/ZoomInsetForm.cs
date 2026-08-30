@@ -1,36 +1,25 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Windows.Forms;
 using Office = Microsoft.Office.Core;
 
 namespace SlideSCI
 {
     /// <summary>
-    /// 「生成放大图」参数对话框（Apple 风格）。
-    /// 选项通过属性暴露给调用方；尺寸计算由 ZoomInsetHelper.ComputeTargetSize 完成。
-    /// 构造时传入当前选区框与原图尺寸（磅），用于实时预览放大图尺寸/放大倍数。
+    /// 「局部放大设置」v4。
+    /// 完全重做交互与布局：分段选择 + 模式联动输入 + 实时示意图预览；
+    /// 沿用 ScientificUiTheme 令牌与外部架构（多选区、等宽保比例、色块选择器、键盘焦点）。
+    /// 构造时可用 ZoomSettings 初始化；确定后通过属性暴露结果。
     /// </summary>
-    public class ZoomInsetForm : Form
+    public sealed class ZoomInsetForm : Form
     {
-        // —— Apple 风格调色板 ——
-        private static readonly Color Accent = Color.FromArgb(0, 122, 255);        // iOS 蓝
-        private static readonly Color AccentHover = Color.FromArgb(0, 113, 227);
-        private static readonly Color TextPrimary = Color.FromArgb(29, 29, 31);    // #1D1D1F
-        private static readonly Color TextSecondary = Color.FromArgb(110, 110, 115); // #6E6E73
-        private static readonly Color WindowBackground = Color.FromArgb(245, 245, 247); // #F5F5F7
-        private static readonly Color CardBackground = Color.White;
-        private static readonly Color CardBorder = Color.FromArgb(229, 229, 234);  // #E5E5EA
-        private static readonly Color PreviewBackground = Color.FromArgb(242, 242, 247); // #F2F2F7
-        private static readonly Color ButtonBorder = Color.FromArgb(209, 209, 214); // #D1D1D6
-        private static readonly Color WarningColor = Color.FromArgb(255, 149, 0);  // iOS 橙
-
         private const int ColorBlack = 0x000000;
         private const int ColorWhite = 0xFFFFFF;
-        private const int ColorRed = 0x0000FF;   // PPT RGB 实为 BGR
+        private const int ColorRed = 0x0000FF;
         private const int ColorBlue = 0xFF0000;
-        private const int ColorGreen = 0x00FF00;
-        private const string CustomItem = "自定义…";
+        private const int ColorGreen = 0x00A651;
         private const float PointsPerCm = 28.3464593f;
 
         private readonly float boxWidth;
@@ -38,23 +27,21 @@ namespace SlideSCI
         private readonly float pictureWidth;
         private readonly float pictureHeight;
 
-        private RadioButton rbSameAsOriginal;
-        private RadioButton rbMultiple;
-        private TextBox txtMagnification;
-        private RadioButton rbCustomWidth;
-        private TextBox txtCustomWidth;
-        private RadioButton rbJournalFunnel;
-        private RadioButton rbCrossedX;
+        private SegmentedControl segTarget;
+        private SegmentedControl segLines;
+        private Label lblActiveInput;
+        private NumericUpDown numMagnification;
+        private NumericUpDown numCustomWidth;
         private ComboBox cmbLineWeight;
         private ComboBox cmbBoxLineWeight;
         private ComboBox cmbLineColor;
         private ComboBox cmbBoxColor;
         private ComboBox cmbLineDash;
-        private TextBox txtGap;
+        private NumericUpDown numGap;
         private CheckBox chkGroup;
         private Label lblPreview;
-        private int customLineColorRgb = ColorRed;
-        private int customBoxColorRgb = ColorRed;
+        private PreviewDiagram diagram;
+        private readonly ToolTip toolTip = new ToolTip();
 
         public ZoomTargetMode TargetMode { get; private set; }
         public float Magnification { get; private set; }
@@ -68,483 +55,698 @@ namespace SlideSCI
         public Office.MsoLineDashStyle LineDashStyle { get; private set; }
         public bool GroupEnabled { get; private set; }
 
-        public ZoomInsetForm(float boxWidth, float boxHeight, float pictureWidth, float pictureHeight)
+        public ZoomInsetForm(float boxWidth, float boxHeight,
+            float pictureWidth, float pictureHeight, ZoomSettings initial = null)
         {
             this.boxWidth = boxWidth;
             this.boxHeight = boxHeight;
             this.pictureWidth = pictureWidth;
             this.pictureHeight = pictureHeight;
 
-            this.Text = "生成局部放大图";
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.ClientSize = new Size(420, 584);
-            this.BackColor = WindowBackground;
-            this.Font = new Font("Segoe UI", 9f);
+            ZoomSettings s = initial ?? ZoomSettings.CreateDefault();
 
-            BuildLayout();
+            Text = "局部放大设置";
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ClientSize = new Size(520, 668);
+            ScientificUiTheme.ConfigureDialog(this);
+
+            BuildLayout(s);
+            SyncInputsEnabled();
             UpdatePreview();
         }
 
-        private void BuildLayout()
+        private void BuildLayout(ZoomSettings s)
         {
-            const int margin = 24;
-            int contentWidth = ClientSize.Width - margin * 2; // 372
-            int y = 18;
+            const int margin = 18;
+            int contentWidth = ClientSize.Width - margin * 2; // 484
+            int y = 16;
 
-            // —— 标题区 ——
+            // —— 头部 ——
             var title = new Label
             {
                 Text = "生成局部放大图",
-                Font = new Font("Segoe UI Semibold", 14f, FontStyle.Bold),
-                ForeColor = TextPrimary,
-                Location = new Point(margin, y),
-                AutoSize = true
+                Font = ScientificUiTheme.ChineseBodyFont(14f, FontStyle.Bold),
+                ForeColor = ScientificUiTheme.Primary,
+                AutoSize = true,
+                Location = new Point(margin, y)
             };
             Controls.Add(title);
-            y += 28;
+
+            var hint = new Label
+            {
+                Text = "Ctrl + 单击工具栏按钮可再次打开本设置",
+                Font = ScientificUiTheme.BodyFont(8.5f),
+                ForeColor = ScientificUiTheme.TextSecondary,
+                AutoSize = true,
+                Location = new Point(margin + contentWidth - 210, y + 6)
+            };
+            Controls.Add(hint);
+            y += 24;
 
             var subtitle = new Label
             {
-                Text = "把选区框内的画面放大，并放置在原图下方",
-                Font = new Font("Segoe UI", 9f),
-                ForeColor = TextSecondary,
-                Location = new Point(margin, y),
-                AutoSize = true
+                Text = "精确裁剪选区，保持原始像素与宽高比；同页支持多个选区，各自独立更新。",
+                Font = ScientificUiTheme.ChineseBodyFont(9f),
+                ForeColor = ScientificUiTheme.TextSecondary,
+                AutoSize = true,
+                Location = new Point(margin, y)
             };
             Controls.Add(subtitle);
-            y += 28;
+            y += 26;
 
-            // —— 卡片一：放大目标 ——
-            var cardTarget = new RoundedPanel
+            // —— 卡片一：放大尺寸 ——
+            var cardTarget = new ScientificCard
             {
-                Bounds = new Rectangle(margin, y, contentWidth, 136),
-                Padding = new Padding(16)
-            };
-            var lblTargetHeader = SectionHeader("放大目标");
-            lblTargetHeader.Location = new Point(4, 4);
-            cardTarget.Controls.Add(lblTargetHeader);
-
-            rbSameAsOriginal = MakeRadio("与原图相同尺寸", 4, 32, cardTarget, true);
-            rbMultiple = MakeRadio("指定放大倍数", 4, 62, cardTarget, false);
-            txtMagnification = MakeSmallInput("2", contentWidth - 16 - 64, 62, 64, cardTarget);
-            rbCustomWidth = MakeRadio("自定义宽度 (cm)", 4, 92, cardTarget, false);
-            txtCustomWidth = MakeSmallInput("10", contentWidth - 16 - 64, 92, 64, cardTarget);
-
-            rbSameAsOriginal.CheckedChanged += (s, e) => { SyncInputsEnabled(); UpdatePreview(); };
-            rbMultiple.CheckedChanged += (s, e) => { SyncInputsEnabled(); UpdatePreview(); };
-            rbCustomWidth.CheckedChanged += (s, e) => { SyncInputsEnabled(); UpdatePreview(); };
-            txtMagnification.TextChanged += (s, e) => UpdatePreview();
-            txtCustomWidth.TextChanged += (s, e) => UpdatePreview();
-
-            Controls.Add(cardTarget);
-            y += 136 + 12;
-
-            // —— 卡片二：框角连线样式 ——
-            var cardLines = new RoundedPanel
-            {
-                Bounds = new Rectangle(margin, y, contentWidth, 100),
-                Padding = new Padding(16)
-            };
-            var lblLinesHeader = SectionHeader("框角连线样式");
-            lblLinesHeader.Location = new Point(4, 4);
-            cardLines.Controls.Add(lblLinesHeader);
-            rbJournalFunnel = MakeRadio("期刊漏斗：框下两角 → 放大图上两角", 4, 34, cardLines, true);
-            rbCrossedX = MakeRadio("交叉 X 形：四角交叉连线", 4, 64, cardLines, false);
-            Controls.Add(cardLines);
-            y += 100 + 12;
-
-            // —— 两列栅格行 ——
-            // 行1：连线粗细 | 框线粗细
-            cmbLineWeight = AddComboRow(y, "连线粗细 (pt)", new object[] { 0.5f, 1f, 1.5f, 2f }, 1);
-            cmbBoxLineWeight = AddComboRow2(y, "框线粗细 (pt)", new object[] { 1f, 1.5f, 2f, 3f }, 1);
-            y += 30;
-
-            // 行2：连线颜色 | 框线颜色
-            cmbLineColor = AddComboRow(y, "连线颜色", new object[] { "黑色", "白色", "红色", "蓝色", "绿色", CustomItem }, 0);
-            cmbLineColor.SelectedIndexChanged += (s, e) => HandleColorSelection(cmbLineColor, ref customLineColorRgb);
-            cmbBoxColor = AddComboRow2(y, "框线颜色", new object[] { "黑色", "红色", "蓝色", "绿色" }, 0);
-            y += 30;
-
-            // 行3：连线线型 | 下边距
-            cmbLineDash = AddComboRow(y, "连线线型", new object[] { "实线", "虚线" }, 0);
-            var lblGap = new Label
-            {
-                Text = "下边距 (cm)",
-                ForeColor = TextPrimary,
-                Location = new Point(200, y + 4),
-                AutoSize = true
-            };
-            Controls.Add(lblGap);
-            txtGap = new TextBox
-            {
-                Text = "0.5",
-                Bounds = new Rectangle(298, y, 64, 24),
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 9f)
-            };
-            Controls.Add(txtGap);
-            y += 34;
-
-            // —— 预览卡 ——
-            var previewCard = new RoundedPanel
-            {
-                Bounds = new Rectangle(margin, y, contentWidth, 66),
-                BackColor = PreviewBackground,
+                Bounds = new Rectangle(margin, y, contentWidth, 148),
                 Padding = new Padding(14, 10, 14, 10)
             };
+            cardTarget.Controls.Add(SectionHeader("放大尺寸", 0, 0));
+
+            segTarget = new SegmentedControl { Bounds = new Rectangle(14, 36, 456, 30) };
+            segTarget.SetItems("与原图等宽", "指定放大倍数", "自定义宽度 (cm)");
+            segTarget.SelectedIndex = (int)s.TargetMode;
+            segTarget.SelectionChanged += (sender, args) =>
+            {
+                SyncInputsEnabled();
+                UpdatePreview();
+            };
+            cardTarget.Controls.Add(segTarget);
+
+            lblActiveInput = new Label
+            {
+                Font = ScientificUiTheme.ChineseBodyFont(9f),
+                ForeColor = ScientificUiTheme.TextPrimary,
+                AutoSize = true,
+                Location = new Point(16, 104)
+            };
+            cardTarget.Controls.Add(lblActiveInput);
+
+            numMagnification = CreateNumber(0.1m, 100m, (decimal)s.Magnification, 0.1m, 1, "放大倍数");
+            numMagnification.Bounds = new Rectangle(132, 98, 110, 26);
+            numMagnification.ValueChanged += (sender, args) => UpdatePreview();
+            cardTarget.Controls.Add(numMagnification);
+
+            numCustomWidth = CreateNumber(0.1m, 200m, (decimal)s.CustomWidthCm, 0.1m, 1, "放大图宽度（厘米）");
+            numCustomWidth.Bounds = new Rectangle(132, 98, 110, 26);
+            numCustomWidth.ValueChanged += (sender, args) => UpdatePreview();
+            cardTarget.Controls.Add(numCustomWidth);
+
+            var aspectNote = new Label
+            {
+                Text = "始终保持选区宽高比，图像不会被拉伸",
+                Font = ScientificUiTheme.BodyFont(8.5f),
+                ForeColor = ScientificUiTheme.TextSecondary,
+                AutoSize = true,
+                Location = new Point(256, 104)
+            };
+            cardTarget.Controls.Add(aspectNote);
+
+            Controls.Add(cardTarget);
+            y += 148 + 12;
+
+            // —— 卡片二：连接方式 ——
+            var cardLines = new ScientificCard
+            {
+                Bounds = new Rectangle(margin, y, contentWidth, 108),
+                Padding = new Padding(14, 10, 14, 10)
+            };
+            cardLines.Controls.Add(SectionHeader("连接方式", 0, 0));
+
+            segLines = new SegmentedControl { Bounds = new Rectangle(14, 36, 456, 30) };
+            segLines.SetItems("期刊漏斗", "交叉引线");
+            segLines.SelectedIndex = s.LineStyle == ZoomLineStyle.CrossedX ? 1 : 0;
+            segLines.SelectionChanged += (sender, args) => UpdatePreview();
+            cardLines.Controls.Add(segLines);
+
+            var funDesc = new Label
+            {
+                Text = "期刊漏斗：选区下方两角 → 放大图上方两角，平行连接",
+                Font = ScientificUiTheme.BodyFont(8.5f),
+                ForeColor = ScientificUiTheme.TextSecondary,
+                AutoSize = true,
+                Location = new Point(16, 76)
+            };
+            cardLines.Controls.Add(funDesc);
+
+            Controls.Add(cardLines);
+            y += 108 + 12;
+
+            // —— 卡片三：线条与布局 ——
+            var cardAppearance = new ScientificCard
+            {
+                Bounds = new Rectangle(margin, y, contentWidth, 136),
+                Padding = new Padding(14, 10, 14, 10)
+            };
+            cardAppearance.Controls.Add(SectionHeader("线条与布局", 0, 0));
+
+            cmbLineWeight = CreateCombo(new object[] { 0.5f, 0.75f, 1f, 1.5f, 2f }, s.LineWeight, "连线粗细");
+            cmbLineColor = CreateColorCombo(s.LineColorRgb, "连线颜色");
+            cmbLineDash = CreateCombo(new object[] { "实线", "虚线" }, s.LineDash, "连线线型");
+            cmbBoxLineWeight = CreateCombo(new object[] { 0.5f, 0.75f, 1f, 1.5f, 2f, 3f }, s.BoxLineWeight, "选区框粗细");
+            cmbBoxColor = CreateColorCombo(s.BoxColorRgb, "选区框颜色");
+            numGap = CreateNumber(0m, 50m, (decimal)s.GapCm, 0.1m, 1, "放大图与原图间距（厘米）");
+            numGap.ValueChanged += (sender, args) => UpdatePreview();
+
+            AddFieldRow(cardAppearance, 36, "连线粗细 (pt)", cmbLineWeight, "连线颜色", cmbLineColor);
+            AddFieldRow(cardAppearance, 68, "选区框粗细 (pt)", cmbBoxLineWeight, "选区框颜色", cmbBoxColor);
+            AddFieldRow(cardAppearance, 100, "连线线型", cmbLineDash, "图间距 (cm)", numGap);
+
+            Controls.Add(cardAppearance);
+            y += 136 + 12;
+
+            // —— 预览卡（示意图 + 文本） ——
+            var cardPreview = new ScientificCard
+            {
+                Bounds = new Rectangle(margin, y, contentWidth, 96),
+                BackColor = ScientificUiTheme.SurfaceMuted,
+                Padding = new Padding(12, 10, 14, 10)
+            };
+            diagram = new PreviewDiagram
+            {
+                Bounds = new Rectangle(10, 10, 118, 76),
+                PicWidth = pictureWidth,
+                PicHeight = Math.Max(1f, pictureHeight),
+                BoxWidth = Math.Max(1f, boxWidth),
+                BoxHeight = Math.Max(1f, boxHeight)
+            };
+            cardPreview.Controls.Add(diagram);
+
             lblPreview = new Label
             {
-                ForeColor = TextSecondary,
-                Font = new Font("Segoe UI", 9f),
-                AutoSize = false,
-                Dock = DockStyle.Fill,
+                Bounds = new Rectangle(136, 10, cardPreview.ClientSize.Width - 136 - 10, 76),
+                ForeColor = ScientificUiTheme.TextSecondary,
+                Font = ScientificUiTheme.ChineseBodyFont(9f),
                 Text = ""
             };
-            previewCard.Controls.Add(lblPreview);
-            Controls.Add(previewCard);
-            y += 66 + 14;
+            cardPreview.Controls.Add(lblPreview);
+
+            Controls.Add(cardPreview);
+            y += 96 + 14;
 
             // —— 编组开关 ——
             chkGroup = new CheckBox
             {
-                Text = "生成后自动编组：框 + 放大图 + 连线组成一组，方便整体移动",
-                ForeColor = TextPrimary,
-                Location = new Point(margin, y),
+                Text = "生成后自动编组（选区框、放大图与连线）",
                 AutoSize = true,
-                MaximumSize = new Size(contentWidth, 0),
-                Checked = true
+                Checked = s.Group,
+                Location = new Point(margin, y),
+                ForeColor = ScientificUiTheme.TextPrimary,
+                AccessibleName = "生成后自动编组"
             };
+            toolTip.SetToolTip(chkGroup, "编组后适合整体移动；重新生成时会保留当前选区框。");
             Controls.Add(chkGroup);
             y += 30;
 
+            var note = new Label
+            {
+                Text = "提示：单击工具栏「生成放大图」将直接沿用本次设置；同一页多个选区时，请先选中要更新的选区框或它所在的组。",
+                Font = ScientificUiTheme.BodyFont(8.5f),
+                ForeColor = ScientificUiTheme.TextSecondary,
+                AutoSize = true,
+                MaximumSize = new Size(contentWidth, 0),
+                Location = new Point(margin, y)
+            };
+            Controls.Add(note);
+            y += note.PreferredSize.Height + 10;
+
             // —— 底部按钮 ——
-            var btnCancel = new RoundedButton
+            var cancel = new ScientificButton
             {
                 Text = "取消",
                 Primary = false,
-                Font = new Font("Segoe UI", 9f),
-                Bounds = new Rectangle(420 - margin - 100 - 10, y, 100, 32)
+                Width = 96,
+                Height = 34,
+                DialogResult = DialogResult.Cancel,
+                Location = new Point(margin + contentWidth - 96 - 8 - 120, y)
             };
-            btnCancel.Click += (s, e) => this.DialogResult = DialogResult.Cancel;
-
-            var btnOk = new RoundedButton
+            var ok = new ScientificButton
             {
-                Text = "生成",
+                Text = "生成放大图",
                 Primary = true,
-                Font = new Font("Segoe UI Semibold", 9.5f),
-                Bounds = new Rectangle(420 - margin - 100, y, 100, 32)
+                Width = 120,
+                Height = 34,
+                AccessibleName = "生成局部放大图",
+                Location = new Point(margin + contentWidth - 120, y)
             };
-            btnOk.Click += (s, e) => { if (ValidateAndRead()) this.DialogResult = DialogResult.OK; };
+            ok.Click += (sender, args) =>
+            {
+                ReadValues();
+                DialogResult = DialogResult.OK;
+            };
+            Controls.Add(cancel);
+            Controls.Add(ok);
+            AcceptButton = ok;
+            CancelButton = cancel;
+            y += 44;
 
-            Controls.Add(btnCancel);
-            Controls.Add(btnOk);
-            this.AcceptButton = btnOk;
-            this.CancelButton = btnCancel;
+            // 实际高度以内容为准
+            ClientSize = new Size(ClientSize.Width, Math.Max(ClientSize.Height, y));
         }
 
-        private static Label SectionHeader(string text)
+        private static Label SectionHeader(string text, int x, int y)
         {
             return new Label
             {
                 Text = text,
-                Font = new Font("Segoe UI Semibold", 10f, FontStyle.Bold),
-                ForeColor = TextPrimary,
-                AutoSize = true
-            };
-        }
-
-        private static RadioButton MakeRadio(string text, int x, int y, Control parent, bool checkedState)
-        {
-            var radio = new RadioButton
-            {
-                Text = text,
-                ForeColor = TextPrimary,
-                Font = new Font("Segoe UI", 9f),
-                Location = new Point(x, y),
+                Font = ScientificUiTheme.ChineseBodyFont(10f, FontStyle.Bold),
+                ForeColor = ScientificUiTheme.Primary,
                 AutoSize = true,
-                MaximumSize = new Size(parent.ClientSize.Width - 90, 0),
-                Checked = checkedState
+                Location = new Point(x, y)
             };
-            parent.Controls.Add(radio);
-            return radio;
         }
 
-        private static TextBox MakeSmallInput(string text, int x, int y, int width, Control parent)
+        private static void AddFieldRow(Control parent, int y, string labelText, Control control,
+            string labelText2, Control control2)
         {
-            var input = new TextBox
+            parent.Controls.Add(new Label
             {
-                Text = text,
-                Bounds = new Rectangle(x, y, width, 24),
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 9f)
-            };
-            parent.Controls.Add(input);
-            return input;
-        }
-
-        private ComboBox AddComboRow(int y, string labelText, object[] items, int selectedIndex)
-        {
-            CurrentRowY = y;
-            AddGridLabel(labelText, 0);
-            return AddGridCombo(items, selectedIndex, 0, y);
-        }
-
-        private ComboBox AddComboRow2(int y, string labelText, object[] items, int selectedIndex)
-        {
-            CurrentRowY = y;
-            AddGridLabel(labelText, 1);
-            return AddGridCombo(items, selectedIndex, 1, y);
-        }
-
-        private void AddGridLabel(string text, int column)
-        {
-            Controls.Add(new Label
-            {
-                Text = text,
-                ForeColor = TextPrimary,
-                Location = new Point(column == 0 ? 24 : 200, CurrentRowY + 4),
-                AutoSize = true
+                Text = labelText,
+                Font = ScientificUiTheme.ChineseBodyFont(9f),
+                ForeColor = ScientificUiTheme.TextSecondary,
+                AutoSize = true,
+                Location = new Point(16, y + 4)
             });
+            control.Bounds = new Rectangle(120, y, 96, 26);
+            parent.Controls.Add(control);
+
+            parent.Controls.Add(new Label
+            {
+                Text = labelText2,
+                Font = ScientificUiTheme.ChineseBodyFont(9f),
+                ForeColor = ScientificUiTheme.TextSecondary,
+                AutoSize = true,
+                Location = new Point(250, y + 4)
+            });
+            control2.Bounds = new Rectangle(348, y, 110, 26);
+            parent.Controls.Add(control2);
         }
 
-        private int CurrentRowY;
+        private NumericUpDown CreateNumber(decimal min, decimal max, decimal value,
+            decimal increment, int decimals, string accessibleName)
+        {
+            var number = new NumericUpDown
+            {
+                Minimum = min,
+                Maximum = max,
+                Value = Math.Max(min, Math.Min(max, value)),
+                Increment = increment,
+                DecimalPlaces = decimals,
+                ThousandsSeparator = false,
+                TextAlign = HorizontalAlignment.Right,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = ScientificUiTheme.ChineseBodyFont(9f),
+                AccessibleName = accessibleName
+            };
+            return number;
+        }
 
-        private ComboBox AddGridCombo(object[] items, int selectedIndex, int column, int y)
+        private ComboBox CreateCombo(object[] values, object selected, string accessibleName)
         {
             var combo = new ComboBox
             {
-                Bounds = new Rectangle(column == 0 ? 118 : 298, y, 66, 24),
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = new Font("Segoe UI", 9f),
-                FlatStyle = FlatStyle.Flat
+                FlatStyle = FlatStyle.Flat,
+                Font = ScientificUiTheme.ChineseBodyFont(9f),
+                AccessibleName = accessibleName
             };
-            combo.Items.AddRange(items);
-            combo.SelectedIndex = selectedIndex;
-            Controls.Add(combo);
+            combo.Items.AddRange(values);
+            int index = Array.IndexOf(values, selected);
+            combo.SelectedIndex = index >= 0 ? index : 0;
+            return combo;
+        }
+
+        private ComboBox CreateColorCombo(int initialRgb, string accessibleName)
+        {
+            var combo = CreateCombo(new object[]
+            {
+                new ColorChoice("黑色", ColorBlack),
+                new ColorChoice("白色", ColorWhite),
+                new ColorChoice("红色", ColorRed),
+                new ColorChoice("蓝色", ColorBlue),
+                new ColorChoice("绿色", ColorGreen),
+                new ColorChoice("自定义…", initialRgb, true)
+            }, initialRgb == ColorRed ? 2 : 0, accessibleName);
+            combo.DrawMode = DrawMode.OwnerDrawFixed;
+            combo.DrawItem += DrawColorItem;
+            combo.SelectedIndexChanged += ColorSelectionChanged;
             return combo;
         }
 
         private void SyncInputsEnabled()
         {
-            txtMagnification.Enabled = rbMultiple.Checked;
-            txtCustomWidth.Enabled = rbCustomWidth.Checked;
+            bool multiple = segTarget.SelectedIndex == (int)ZoomTargetMode.Multiple;
+            bool custom = segTarget.SelectedIndex == (int)ZoomTargetMode.CustomWidthCm;
+
+            lblActiveInput.Text = multiple ? "放大倍数" : custom ? "放大图宽度 (cm)" : "";
+            numMagnification.Visible = multiple;
+            numCustomWidth.Visible = custom;
         }
 
-        private void HandleColorSelection(ComboBox combo, ref int customRgb)
+        private void DrawColorItem(object sender, DrawItemEventArgs e)
         {
-            if (!combo.Text.Equals(CustomItem, StringComparison.Ordinal)) return;
+            e.DrawBackground();
+            if (!(sender is ComboBox combo) || e.Index < 0 || e.Index >= combo.Items.Count) return;
 
-            using (var dialog = new ColorDialog { FullOpen = true })
+            var choice = combo.Items[e.Index] as ColorChoice;
+            Rectangle swatch = new Rectangle(e.Bounds.Left + 4, e.Bounds.Top + 4, 15,
+                Math.Max(8, e.Bounds.Height - 8));
+            using (var brush = new SolidBrush(RgbToColor(choice?.Rgb ?? ColorBlack)))
+            using (var border = new Pen(ScientificUiTheme.Border))
+            {
+                e.Graphics.FillRectangle(brush, swatch);
+                e.Graphics.DrawRectangle(border, swatch);
+            }
+            TextRenderer.DrawText(e.Graphics, choice?.Label ?? string.Empty, combo.Font,
+                new Rectangle(swatch.Right + 6, e.Bounds.Top, e.Bounds.Width - swatch.Width - 12, e.Bounds.Height),
+                e.ForeColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            e.DrawFocusRectangle();
+        }
+
+        private void ColorSelectionChanged(object sender, EventArgs e)
+        {
+            if (!(sender is ComboBox combo) || !(combo.SelectedItem is ColorChoice choice) || !choice.Custom) return;
+
+            using (var dialog = new ColorDialog
+            {
+                FullOpen = true,
+                Color = RgbToColor(choice.Rgb)
+            })
             {
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
-                    customRgb = ColorToRgb(dialog.Color);
+                    choice.Rgb = ColorToRgb(dialog.Color);
+                    combo.Invalidate();
+                    UpdatePreview();
                 }
-                else
-                {
-                    combo.SelectedIndex = 0; // 取消则回到黑色
-                }
-            }
-        }
-
-        private static int ColorToRgb(Color color)
-        {
-            return (color.B << 16) | (color.G << 8) | color.R; // PPT RGB 实为 BGR
-        }
-
-        private static int GetColorRgb(ComboBox combo, int customRgb)
-        {
-            switch (combo.Text)
-            {
-                case "白色": return ColorWhite;
-                case "红色": return ColorRed;
-                case "蓝色": return ColorBlue;
-                case "绿色": return ColorGreen;
-                case CustomItem: return customRgb;
-                default: return ColorBlack;
             }
         }
 
         private void UpdatePreview()
         {
-            if (lblPreview == null) return;
+            if (lblPreview == null || boxWidth <= 0 || boxHeight <= 0) return;
 
-            string text;
-            bool stretched = false;
-
-            if (rbMultiple.Checked && float.TryParse(txtMagnification.Text.Trim(), out float mag) && mag > 0)
+            float targetWidth;
+            float targetHeight;
+            if (segTarget.SelectedIndex == (int)ZoomTargetMode.Multiple)
             {
-                float w = PointsToCm(boxWidth * mag);
-                float h = PointsToCm(boxHeight * mag);
-                text = $"放大图尺寸 ≈ {w:0.0} × {h:0.0} cm（{mag:0.#}×）";
+                float factor = (float)numMagnification.Value;
+                targetWidth = boxWidth * factor;
+                targetHeight = boxHeight * factor;
             }
-            else if (rbCustomWidth.Checked && float.TryParse(txtCustomWidth.Text.Trim(), out float wCm) && wCm > 0)
+            else if (segTarget.SelectedIndex == (int)ZoomTargetMode.CustomWidthCm)
             {
-                float h = boxWidth > 0 ? PointsToCm(boxHeight) * (wCm / PointsToCm(boxWidth)) : 0;
-                text = $"放大图尺寸 ≈ {wCm:0.0} × {h:0.0} cm（按选区比例）";
+                targetWidth = CmToPoints((float)numCustomWidth.Value);
+                targetHeight = boxHeight * (targetWidth / boxWidth);
             }
             else
             {
-                float w = PointsToCm(pictureWidth);
-                float h = PointsToCm(pictureHeight);
-                text = $"放大图尺寸 ≈ {w:0.0} × {h:0.0} cm（原图大小）";
-                if (boxWidth > 0) text += $"\n实际放大倍数 ≈ {pictureWidth / boxWidth:F1}×";
-                if (boxWidth > 0 && boxHeight > 0 && pictureWidth > 0 && pictureHeight > 0)
-                {
-                    float boxAspect = boxWidth / boxHeight;
-                    float picAspect = pictureWidth / pictureHeight;
-                    if (Math.Abs(boxAspect - picAspect) / Math.Max(boxAspect, picAspect) > 0.01f)
-                    {
-                        text += "\n⚠ 选区与目标画面比例不一致，将按原图尺寸拉伸";
-                        stretched = true;
-                    }
-                }
+                targetWidth = pictureWidth;
+                targetHeight = boxHeight * (targetWidth / boxWidth);
             }
 
-            lblPreview.Text = text;
-            lblPreview.ForeColor = stretched ? WarningColor : TextSecondary;
+            float factorX = targetWidth / boxWidth;
+            float widthCm = PointsToCm(targetWidth);
+            float heightCm = PointsToCm(targetHeight);
+
+            lblPreview.Text = string.Format(CultureInfo.CurrentCulture,
+                "目标尺寸约 {0:0.0} × {1:0.0} cm\n实际放大 {2:0.0}×\n保持选区宽高比；下方空间不足时自动放到原图右侧。",
+                widthCm, heightCm, factorX);
+            lblPreview.ForeColor = widthCm > 40f || heightCm > 40f
+                ? ScientificUiTheme.Warning
+                : ScientificUiTheme.TextSecondary;
+
+            if (diagram != null)
+            {
+                diagram.TargetWidth = targetWidth;
+                diagram.TargetHeight = targetHeight;
+                diagram.LineStyle = segLines.SelectedIndex == 1 ? ZoomLineStyle.CrossedX : ZoomLineStyle.JournalFunnel;
+                var lineChoice = cmbLineColor.SelectedItem as ColorChoice;
+                var boxChoice = cmbBoxColor.SelectedItem as ColorChoice;
+                diagram.LineColorRgb = lineChoice?.Rgb ?? ColorBlack;
+                diagram.BoxColorRgb = boxChoice?.Rgb ?? ColorBlack;
+                diagram.Invalidate();
+            }
         }
 
-        private static float PointsToCm(float points) => points / PointsPerCm;
-
-        private bool ValidateAndRead()
+        private void ReadValues()
         {
-            if (rbSameAsOriginal.Checked)
-            {
-                TargetMode = ZoomTargetMode.SameAsOriginal;
-            }
-            else if (rbMultiple.Checked)
-            {
-                if (!float.TryParse(txtMagnification.Text.Trim(), out float mag) || mag <= 0 || mag > 100)
-                {
-                    MessageBox.Show("请输入有效的放大倍数（大于 0）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return false;
-                }
-                TargetMode = ZoomTargetMode.Multiple;
-                Magnification = mag;
-            }
-            else
-            {
-                if (!float.TryParse(txtCustomWidth.Text.Trim(), out float w) || w <= 0 || w > 200)
-                {
-                    MessageBox.Show("请输入有效的放大图宽度（cm，0–200）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    return false;
-                }
-                TargetMode = ZoomTargetMode.CustomWidthCm;
-                CustomWidthCm = w;
-            }
-
-            if (!float.TryParse(txtGap.Text.Trim(), out float gap) || gap < 0 || gap > 50)
-            {
-                MessageBox.Show("请输入有效的下边距（cm，0–50）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
-            }
-
-            GapCm = gap;
-            LineStyle = rbCrossedX.Checked ? ZoomLineStyle.CrossedX : ZoomLineStyle.JournalFunnel;
-            LineWeight = (float)cmbLineWeight.SelectedItem;
-            BoxLineWeight = (float)cmbBoxLineWeight.SelectedItem;
-            LineColorRgb = GetColorRgb(cmbLineColor, customLineColorRgb);
-            BoxColorRgb = GetColorRgb(cmbBoxColor, customBoxColorRgb);
+            TargetMode = (ZoomTargetMode)segTarget.SelectedIndex;
+            Magnification = (float)numMagnification.Value;
+            CustomWidthCm = (float)numCustomWidth.Value;
+            GapCm = (float)numGap.Value;
+            LineStyle = segLines.SelectedIndex == 1 ? ZoomLineStyle.CrossedX : ZoomLineStyle.JournalFunnel;
+            LineWeight = Convert.ToSingle(cmbLineWeight.SelectedItem, CultureInfo.InvariantCulture);
+            BoxLineWeight = Convert.ToSingle(cmbBoxLineWeight.SelectedItem, CultureInfo.InvariantCulture);
+            LineColorRgb = ((ColorChoice)cmbLineColor.SelectedItem).Rgb;
+            BoxColorRgb = ((ColorChoice)cmbBoxColor.SelectedItem).Rgb;
             LineDashStyle = cmbLineDash.SelectedIndex == 1
                 ? Office.MsoLineDashStyle.msoLineDash
                 : Office.MsoLineDashStyle.msoLineSolid;
             GroupEnabled = chkGroup.Checked;
-            return true;
         }
 
-        /// <summary>白色圆角卡片面板。</summary>
-        private sealed class RoundedPanel : Panel
+        private static float CmToPoints(float cm) => cm * PointsPerCm;
+        private static float PointsToCm(float points) => points / PointsPerCm;
+
+        private static int ColorToRgb(Color color)
         {
-            public RoundedPanel()
+            return (color.B << 16) | (color.G << 8) | color.R;
+        }
+
+        private static Color RgbToColor(int rgb)
+        {
+            return Color.FromArgb(rgb & 0xFF, (rgb >> 8) & 0xFF, (rgb >> 16) & 0xFF);
+        }
+
+        /// <summary>分段选择控件：药丸轨道 + 白色选中段，支持键盘左右键与焦点框。</summary>
+        private sealed class SegmentedControl : Control
+        {
+            private string[] items = new string[0];
+            private int selectedIndex;
+            private int hoverIndex = -1;
+
+            public event EventHandler SelectionChanged;
+
+            public int SelectedIndex
             {
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-                BackColor = CardBackground;
+                get => selectedIndex;
+                set
+                {
+                    if (value < 0 || value >= items.Length || value == selectedIndex) return;
+                    selectedIndex = value;
+                    SelectionChanged?.Invoke(this, EventArgs.Empty);
+                    Invalidate();
+                }
             }
 
-            protected override void OnPaintBackground(PaintEventArgs e) { }
+            public SegmentedControl()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                         ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+                BackColor = Color.Transparent;
+                Font = ScientificUiTheme.ChineseBodyFont(9f);
+                TabStop = true;
+                Height = 30;
+            }
+
+            public void SetItems(params string[] values)
+            {
+                Array.Resize(ref items, values.Length);
+                Array.Copy(values, items, values.Length);
+                selectedIndex = 0;
+                Invalidate();
+            }
+
+            protected override void OnMouseLeave(EventArgs e) { hoverIndex = -1; Invalidate(); base.OnMouseLeave(e); }
+
+            protected override void OnMouseMove(MouseEventArgs e)
+            {
+                int hit = HitTest(e.X);
+                if (hit != hoverIndex) { hoverIndex = hit; Invalidate(); }
+                base.OnMouseMove(e);
+            }
+
+            protected override void OnMouseDown(MouseEventArgs e)
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    int hit = HitTest(e.X);
+                    if (hit >= 0) { SelectedIndex = hit; Focus(); }
+                }
+                base.OnMouseDown(e);
+            }
+
+            protected override void OnKeyDown(KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Left && selectedIndex > 0) { SelectedIndex--; e.Handled = true; }
+                else if (e.KeyCode == Keys.Right && selectedIndex < items.Length - 1) { SelectedIndex++; e.Handled = true; }
+                base.OnKeyDown(e);
+            }
+
+            private int HitTest(int x)
+            {
+                if (items.Length == 0) return -1;
+                int w = Width / items.Length;
+                int index = x / w;
+                return Math.Min(items.Length - 1, Math.Max(0, index));
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                if (items.Length == 0) return;
+                Graphics g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                using (GraphicsPath track = ScientificUiTheme.RoundedPath(
+                    new Rectangle(0, 0, Width - 1, Height - 1), Height / 2))
+                using (var trackBrush = new SolidBrush(Color.FromArgb(226, 232, 240)))
+                {
+                    g.FillPath(trackBrush, track);
+                }
+
+                int w = Width / items.Length;
+                for (int i = 0; i < items.Length; i++)
+                {
+                    Rectangle segment = new Rectangle(i * w, 0, w, Height);
+                    if (i == selectedIndex)
+                    {
+                        using (GraphicsPath selected = ScientificUiTheme.RoundedPath(
+                            new Rectangle(segment.Left + 2, 2, w - 4, Height - 5), Height / 2 - 2))
+                        using (var fill = new SolidBrush(ScientificUiTheme.Surface))
+                        using (var border = new Pen(ScientificUiTheme.Border))
+                        {
+                            g.FillPath(fill, selected);
+                            g.DrawPath(border, selected);
+                        }
+                    }
+
+                    Color text = i == selectedIndex
+                        ? ScientificUiTheme.TextPrimary
+                        : i == hoverIndex
+                            ? ScientificUiTheme.Action
+                            : ScientificUiTheme.TextSecondary;
+                    TextRenderer.DrawText(g, items[i], Font, segment, text,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter |
+                        TextFormatFlags.EndEllipsis);
+                }
+
+                if (Focused)
+                {
+                    ControlPaint.DrawFocusRectangle(g, new Rectangle(2, 2, Width - 5, Height - 5),
+                        ScientificUiTheme.Focus, Color.Transparent);
+                }
+            }
+        }
+
+        /// <summary>实时示意图：原图 + 选区框 + 放大图 + 引线，按当前参数绘制。</summary>
+        private sealed class PreviewDiagram : Control
+        {
+            public float PicWidth { get; set; }
+            public float PicHeight { get; set; }
+            public float BoxWidth { get; set; }
+            public float BoxHeight { get; set; }
+            public float TargetWidth { get; set; }
+            public float TargetHeight { get; set; }
+            public ZoomLineStyle LineStyle { get; set; } = ZoomLineStyle.JournalFunnel;
+            public int LineColorRgb { get; set; } = ColorBlack;
+            public int BoxColorRgb { get; set; } = ColorBlack;
+
+            public PreviewDiagram()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                         ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+                BackColor = Color.Transparent;
+            }
 
             protected override void OnPaint(PaintEventArgs e)
             {
                 Graphics g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                using (GraphicsPath path = GetRoundedPath(new Rectangle(0, 0, Width - 1, Height - 1), 12))
-                using (var fill = new SolidBrush(BackColor))
-                using (var pen = new Pen(CardBorder))
-                {
-                    g.FillPath(fill, path);
-                    g.DrawPath(pen, path);
-                }
-            }
 
-            private static GraphicsPath GetRoundedPath(Rectangle bounds, int radius)
-            {
-                var path = new GraphicsPath();
-                int d = radius * 2;
-                path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
-                path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
-                path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
-                path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
-                path.CloseFigure();
-                return path;
+                const float layoutH = 68f;
+                const float originalWidth = 58f;
+
+                float picAspect = PicHeight / Math.Max(1f, PicWidth);
+                float targetAspect = TargetHeight / Math.Max(1f, TargetWidth);
+                float originalHeight = Math.Max(10f, originalWidth * picAspect);
+                float insetHeight = Math.Max(10f, originalWidth * targetAspect);
+                float total = originalHeight + 8f + insetHeight;
+                float scale = total > layoutH ? layoutH / total : 1f;
+
+                float ow = originalWidth * scale;
+                float oh = originalHeight * scale;
+                float iw = originalWidth * scale;
+                float ih = insetHeight * scale;
+                float x = (Width - ow) / 2f;
+                float originalTop = (Height - total * scale) / 2f;
+                float insetTop = originalTop + oh + 8f * scale;
+
+                using (var fill = new SolidBrush(ScientificUiTheme.SurfaceMuted))
+                using (var border = new Pen(ScientificUiTheme.Border))
+                {
+                    // 原图
+                    g.FillRectangle(fill, x, originalTop, ow, oh);
+                    g.DrawRectangle(border, x, originalTop, ow, oh);
+
+                    // 放大图
+                    g.FillRectangle(fill, x, insetTop, iw, ih);
+                    g.DrawRectangle(border, x, insetTop, iw, ih);
+                }
+
+                // 选区框
+                float bw = ow * (BoxWidth / Math.Max(1f, PicWidth));
+                float bh = bw * (BoxHeight / Math.Max(1f, BoxWidth));
+                float bx = x + (ow - bw) / 2f;
+                float by = originalTop + (oh - bh) / 2f;
+                using (var boxPen = new Pen(RgbToColor(BoxColorRgb), 1.4f))
+                {
+                    g.DrawRectangle(boxPen, bx, by, bw, bh);
+                }
+
+                // 引线
+                using (var linePen = new Pen(RgbToColor(LineColorRgb), 1.2f))
+                {
+                    float boxBLx = bx, boxBLy = by + bh;
+                    float boxBRx = bx + bw, boxBRy = by + bh;
+                    float boxTLx = bx, boxTLy = by;
+                    float boxTRx = bx + bw, boxTRy = by;
+                    float insTLx = x, insTLy = insetTop;
+                    float insTRx = x + iw, insTRy = insetTop;
+                    float insBRx = x + iw;
+                    float insBRy = insetTop + ih;
+
+                    if (LineStyle == ZoomLineStyle.JournalFunnel)
+                    {
+                        g.DrawLine(linePen, boxBLx, boxBLy, insTLx, insTLy);
+                        g.DrawLine(linePen, boxBRx, boxBRy, insTRx, insTRy);
+                    }
+                    else
+                    {
+                        g.DrawLine(linePen, boxTLx, boxTLy, insTRx, insTRy);
+                        g.DrawLine(linePen, boxTRx, boxTRy, insTLx, insTLy);
+                        g.DrawLine(linePen, boxBLx, boxBLy, insBRx, insBRy);
+                        g.DrawLine(linePen, boxBRx, boxBRy, insTLx, insTLy);
+                    }
+                }
             }
         }
 
-        /// <summary>圆角按钮：主按钮为 iOS 蓝实心，次要按钮为白色描边。</summary>
-        private sealed class RoundedButton : Button
+        private sealed class ColorChoice
         {
-            private bool hovered;
+            internal string Label { get; }
+            internal int Rgb { get; set; }
+            internal bool Custom { get; }
 
-            public bool Primary { get; set; } = true;
-
-            public RoundedButton()
+            internal ColorChoice(string label, int rgb, bool custom = false)
             {
-                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-                FlatStyle = FlatStyle.Flat;
-                FlatAppearance.BorderSize = 0;
-                Cursor = Cursors.Hand;
+                Label = label;
+                Rgb = rgb;
+                Custom = custom;
             }
 
-            protected override void OnMouseEnter(EventArgs e) { hovered = true; Invalidate(); base.OnMouseEnter(e); }
-            protected override void OnMouseLeave(EventArgs e) { hovered = false; Invalidate(); base.OnMouseLeave(e); }
-
-            protected override void OnPaint(PaintEventArgs pevent)
-            {
-                Graphics g = pevent.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                var rect = new Rectangle(0, 0, Width - 1, Height - 1);
-                using (GraphicsPath path = GetRoundedPath(rect, 8))
-                {
-                    Color fill = Primary
-                        ? (hovered ? AccentHover : Accent)
-                        : (hovered ? Color.FromArgb(242, 242, 247) : Color.White);
-                    Color text = Primary ? Color.White : TextPrimary;
-
-                    using (var brush = new SolidBrush(fill)) g.FillPath(brush, path);
-                    if (!Primary)
-                    {
-                        using (var pen = new Pen(ButtonBorder)) g.DrawPath(pen, path);
-                    }
-
-                    TextRenderer.DrawText(g, Text, Font, rect, text,
-                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                }
-            }
-
-            private static GraphicsPath GetRoundedPath(Rectangle bounds, int radius)
-            {
-                var path = new GraphicsPath();
-                int d = radius * 2;
-                path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
-                path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
-                path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
-                path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
-                path.CloseFigure();
-                return path;
-            }
+            public override string ToString() => Label;
         }
     }
 }
