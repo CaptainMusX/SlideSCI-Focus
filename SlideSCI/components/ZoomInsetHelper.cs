@@ -70,7 +70,7 @@ namespace SlideSCI
             string uniquePart = Guid.NewGuid().ToString("N").Substring(0, 8);
             box.Name = BoxNamePrefix + picture.Id.ToString(CultureInfo.InvariantCulture) + "_" + uniquePart;
             box.Fill.Visible = MsoTriState.msoFalse;
-            box.Line.ForeColor.RGB = 0x0000FF;
+            box.Line.ForeColor.RGB = 0x000000;
             box.Line.Weight = boxLineWeight;
             return box;
         }
@@ -277,6 +277,24 @@ namespace SlideSCI
                 }
 
                 artifactKey = GetArtifactKey(box);
+                bool cleanedLegacy = false;
+                if (IsLegacyBoxName(box))
+                {
+                    // 旧版本选区框名不含 GUID：其残留物前缀为
+                    // SlideSCI_ZoomInset_<图片Id>_*，与新版 key 不同，清理永远匹配不上，
+                    // 导致每次重生成都叠加一层旧放大图/连线。升级时先整体清扫该图片的
+                    // 旧格式残留，再把选区框迁移到新版命名，之后按新 key 增量清理。
+                    if (TryGetSourcePictureId(box, out int legacyPictureId))
+                    {
+                        cleanedLegacy = CleanLegacyArtifacts(slide, legacyPictureId) > 0;
+                    }
+                    box.Name = BoxNamePrefix
+                        + (TryGetSourcePictureId(box, out int migratedPictureId)
+                            ? migratedPictureId.ToString(CultureInfo.InvariantCulture)
+                            : box.Id.ToString(CultureInfo.InvariantCulture))
+                        + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                    artifactKey = GetArtifactKey(box);
+                }
                 CleanUpPreviousArtifacts(slide, artifactKey);
 
                 PowerPoint.Shape duplicate = picture.Duplicate()[1];
@@ -358,6 +376,11 @@ namespace SlideSCI
                 {
                     result.Warning = AppendWarning(result.Warning,
                         "部分连接点无法粘附；整体移动仍正常，单独移动组件后请重新生成。");
+                }
+                if (cleanedLegacy)
+                {
+                    result.Warning = AppendWarning(result.Warning,
+                        "已清理旧版本遗留的放大图与连线，并升级了选区框命名。");
                 }
                 result.Ok = true;
                 return result;
@@ -813,6 +836,102 @@ namespace SlideSCI
                 if (suffix.IndexOf('_') >= 0) return suffix;
             }
             return box.Id.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// 旧版本选区框名（无 GUID 段），例如 SlideSCI_ZoomBox_37。
+        /// </summary>
+        private static bool IsLegacyBoxName(PowerPoint.Shape box)
+        {
+            string name = box?.Name ?? string.Empty;
+            if (!name.StartsWith(BoxNamePrefix, StringComparison.Ordinal)) return false;
+            string suffix = name.Substring(BoxNamePrefix.Length);
+            // 新格式 = <图片Id>_<8位hex>；旧格式 = 仅 <图片Id>
+            int separator = suffix.IndexOf('_');
+            if (separator < 0) return true;
+            string idPart = suffix.Substring(0, separator);
+            string remain = suffix.Substring(separator + 1);
+            return !(remain.Length == 8 && IsHexString(remain));
+        }
+
+        private static bool IsHexString(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            foreach (char c in text)
+            {
+                if (!Uri.IsHexDigit(c)) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 删除指定图片的旧格式生成物（SlideSCI_ZoomInset_&lt;图片Id&gt;_*，无 GUID 段），
+        /// 逐层拆开包含它们的编组；不影响新版多实例的其他选区。返回清理数量。
+        /// </summary>
+        private static int CleanLegacyArtifacts(PowerPoint.Slide slide, int pictureId)
+        {
+            if (slide == null) return 0;
+            string legacyPrefix = InsetNamePrefix + pictureId.ToString(CultureInfo.InvariantCulture) + "_";
+
+            bool IsLegacyName(string name)
+            {
+                if (!name.StartsWith(legacyPrefix, StringComparison.Ordinal)) return false;
+                string rest = name.Substring(legacyPrefix.Length);
+                int separator = rest.IndexOf('_');
+                string first = separator >= 0 ? rest.Substring(0, separator) : rest;
+                // 新版 = <8位hex>_<suffix>；旧版 = Pic/LineN/Unit/Anchor_*
+                return !(first.Length == 8 && IsHexString(first));
+            }
+
+            bool changed = true;
+            while (changed)
+            {
+                changed = false;
+                var groups = new List<PowerPoint.Shape>();
+                foreach (PowerPoint.Shape shape in slide.Shapes)
+                {
+                    try
+                    {
+                        if (shape.Type == MsoShapeType.msoGroup && GroupContainsLegacy(shape, IsLegacyName))
+                        {
+                            groups.Add(shape);
+                        }
+                    }
+                    catch { }
+                }
+                foreach (PowerPoint.Shape group in groups)
+                {
+                    try { group.Ungroup(); changed = true; } catch { }
+                }
+            }
+
+            var toDelete = new List<PowerPoint.Shape>();
+            foreach (PowerPoint.Shape shape in slide.Shapes)
+            {
+                if (IsLegacyName(shape.Name ?? string.Empty)) toDelete.Add(shape);
+            }
+            foreach (PowerPoint.Shape shape in toDelete)
+            {
+                try { shape.Delete(); } catch { }
+            }
+            return toDelete.Count;
+        }
+
+        private static bool GroupContainsLegacy(PowerPoint.Shape group,
+            Func<string, bool> isLegacyName)
+        {
+            try
+            {
+                if (isLegacyName(group.Name ?? string.Empty)) return true;
+                foreach (PowerPoint.Shape child in group.GroupItems)
+                {
+                    if (isLegacyName(child.Name ?? string.Empty)) return true;
+                    if (child.Type == MsoShapeType.msoGroup &&
+                        GroupContainsLegacy(child, isLegacyName)) return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         private static string MakeInsetName(string artifactKey, string suffix)
