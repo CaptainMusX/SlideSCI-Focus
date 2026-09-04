@@ -544,7 +544,8 @@ namespace SlideSCI
             public SegmentedControl()
             {
                 SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                         ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+                         ControlStyles.ResizeRedraw | ControlStyles.UserPaint |
+                         ControlStyles.SupportsTransparentBackColor, true);
                 BackColor = Color.Transparent;
                 Font = ScientificUiTheme.ChineseBodyFont(9f);
                 TabStop = true;
@@ -656,7 +657,8 @@ namespace SlideSCI
             public PreviewDiagram()
             {
                 SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                         ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+                         ControlStyles.ResizeRedraw | ControlStyles.UserPaint |
+                         ControlStyles.SupportsTransparentBackColor, true);
                 BackColor = Color.Transparent;
             }
 
