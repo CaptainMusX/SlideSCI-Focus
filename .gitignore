@@ -1,0 +1,11 @@
+.vs
+SlideSCI/obj/
+SlideSCI/bin/
+SlideSCI/publish/
+artifacts/
+*.pfx
+*.snk
+packages/
+node_modules/
+pnpm-lock.yaml
+PPT介绍/

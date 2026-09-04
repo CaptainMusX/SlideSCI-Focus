@@ -1,0 +1,6431 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Text;
+using System.Globalization;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+using DocumentFormat.OpenXml.Packaging;
+using Markdig;
+using Microsoft.Office.Interop.PowerPoint;
+using Microsoft.Office.Tools.Ribbon;
+using Font = System.Drawing.Font;
+using Office = Microsoft.Office.Core;
+using PowerPoint = Microsoft.Office.Interop.PowerPoint;
+
+namespace SlideSCI
+{
+    public partial class Ribbon1
+    {
+        private PowerPoint.Application app;
+        private float copiedWidth;
+        private float copiedHeight;
+
+        private List<float> copiedLeft = new List<float>();
+        private List<float> copiedTop = new List<float>();
+        private List<int> selectedShapeIdsByOrder = new List<int>();
+        private SpacingForm spacingForm = null;
+        private ScaleForm scaleForm = null;
+        private Timer settingsSaveTimer;
+
+        public enum AlignmentPosition
+        {
+            TopLeft,
+            TopCenter,
+            TopRight,
+            MiddleLeft,
+            Center,
+            MiddleRight,
+            BottomLeft,
+            BottomCenter,
+            BottomRight
+        }
+
+        private AlignmentPosition lastCopiedAlignment = AlignmentPosition.Center;
+        private AlignmentPosition lastSwapAlignment = AlignmentPosition.TopLeft;
+
+        private bool TryGetActiveSlide(out Slide slide)
+        {
+            slide = null;
+            try
+            {
+                if (app == null)
+                {
+                    app = Globals.ThisAddIn.Application;
+                }
+
+                return PowerPointContext.TryGetActiveSlide(app, out slide);
+            }
+            catch
+            {
+                slide = null;
+                return false;
+            }
+        }
+
+        private static bool TryParseFloat(string text, out float value)
+        {
+            const NumberStyles styles = NumberStyles.Float;
+            string input = text?.Trim();
+
+            return float.TryParse(input, styles, CultureInfo.CurrentCulture, out value)
+                || float.TryParse(input, styles, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static bool IsPictureShape(Shape shape)
+        {
+            if (shape == null) return false;
+
+            try
+            {
+                if (shape.Type == Office.MsoShapeType.msoPicture
+                    || shape.Type == Office.MsoShapeType.msoLinkedPicture)
+                {
+                    return true;
+                }
+
+                // Picture placeholders are represented as msoPlaceholder. Reading
+                // PictureFormat is the reliable way to retain support for them.
+                if (shape.Type == Office.MsoShapeType.msoPlaceholder)
+                {
+                    float cropLeft = shape.PictureFormat.CropLeft;
+                    return cropLeft >= 0;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private (float X, float Y) GetShapeAlignmentPoint(Shape shape, AlignmentPosition alignment)
+        {
+            float x = 0;
+            float y = 0;
+            switch (alignment)
+            {
+                case AlignmentPosition.TopLeft:
+                    x = shape.Left;
+                    y = shape.Top;
+                    break;
+                case AlignmentPosition.TopCenter:
+                    x = shape.Left + shape.Width / 2f;
+                    y = shape.Top;
+                    break;
+                case AlignmentPosition.TopRight:
+                    x = shape.Left + shape.Width;
+                    y = shape.Top;
+                    break;
+                case AlignmentPosition.MiddleLeft:
+                    x = shape.Left;
+                    y = shape.Top + shape.Height / 2f;
+                    break;
+                case AlignmentPosition.Center:
+                    x = shape.Left + shape.Width / 2f;
+                    y = shape.Top + shape.Height / 2f;
+                    break;
+                case AlignmentPosition.MiddleRight:
+                    x = shape.Left + shape.Width;
+                    y = shape.Top + shape.Height / 2f;
+                    break;
+                case AlignmentPosition.BottomLeft:
+                    x = shape.Left;
+                    y = shape.Top + shape.Height;
+                    break;
+                case AlignmentPosition.BottomCenter:
+                    x = shape.Left + shape.Width / 2f;
+                    y = shape.Top + shape.Height;
+                    break;
+                case AlignmentPosition.BottomRight:
+                    x = shape.Left + shape.Width;
+                    y = shape.Top + shape.Height;
+                    break;
+            }
+            return (x, y);
+        }
+
+        private void SetShapeAlignmentPoint(Shape shape, AlignmentPosition alignment, float targetX, float targetY)
+        {
+            switch (alignment)
+            {
+                case AlignmentPosition.TopLeft:
+                    shape.Left = targetX;
+                    shape.Top = targetY;
+                    break;
+                case AlignmentPosition.TopCenter:
+                    shape.Left = targetX - shape.Width / 2f;
+                    shape.Top = targetY;
+                    break;
+                case AlignmentPosition.TopRight:
+                    shape.Left = targetX - shape.Width;
+                    shape.Top = targetY;
+                    break;
+                case AlignmentPosition.MiddleLeft:
+                    shape.Left = targetX;
+                    shape.Top = targetY - shape.Height / 2f;
+                    break;
+                case AlignmentPosition.Center:
+                    shape.Left = targetX - shape.Width / 2f;
+                    shape.Top = targetY - shape.Height / 2f;
+                    break;
+                case AlignmentPosition.MiddleRight:
+                    shape.Left = targetX - shape.Width;
+                    shape.Top = targetY - shape.Height / 2f;
+                    break;
+                case AlignmentPosition.BottomLeft:
+                    shape.Left = targetX;
+                    shape.Top = targetY - shape.Height;
+                    break;
+                case AlignmentPosition.BottomCenter:
+                    shape.Left = targetX - shape.Width / 2f;
+                    shape.Top = targetY - shape.Height;
+                    break;
+                case AlignmentPosition.BottomRight:
+                    shape.Left = targetX - shape.Width;
+                    shape.Top = targetY - shape.Height;
+                    break;
+            }
+        }
+
+        private float cropLeft;
+        private float cropRight;
+        private float cropTop;
+        private float cropBottom;
+        private bool hasCopiedCrop = false;
+        private float originalHeight; // 添加变量存储原始图片高度
+        private float currentCropedHeight;
+
+        private void Ribbon1_Load(object sender, RibbonUIEventArgs e)
+        {
+            app = Globals.ThisAddIn.Application;
+            app.WindowSelectionChange -= App_WindowSelectionChange;
+            app.WindowSelectionChange += App_WindowSelectionChange;
+
+            if (settingsSaveTimer == null)
+            {
+                settingsSaveTimer = new Timer { Interval = 500 };
+                settingsSaveTimer.Tick += (s, args) =>
+                {
+                    settingsSaveTimer.Stop();
+                    PersistSettings();
+                };
+            }
+
+            iniCombobox();
+
+            // Load Image Title Settings
+            fontNameEditBox.Text = Properties.Settings.Default.TitleFontName;
+            fontSizeEditBox.Text = Properties.Settings.Default.TitleFontSize;
+            distanceFromBottomEditBox.Text = Properties.Settings.Default.TitleDistanceFromBottom;
+            titleTextEditBox.Text = Properties.Settings.Default.TitleText;
+            autoGroupCheckBox.Checked = Properties.Settings.Default.AutoGroup;
+
+            // Load Image Label Settings
+            labelOffsetXEditBox.Text = Properties.Settings.Default.LabelOffsetX;
+            labelOffsetYEditBox.Text = Properties.Settings.Default.LabelOffsetY;
+            labelTemplateComboBox.Text = Properties.Settings.Default.LabelTemplate;
+            labelFontNameEditBox.Text = Properties.Settings.Default.LabelFontName;
+            labelFontSizeEditBox.Text = Properties.Settings.Default.LabelFontSize;
+            labelBoldcheckBox.Checked = Properties.Settings.Default.LabelBold;
+            labelIndex.Text = "1";
+            labelIndexUpdatecheckBox.Checked = true;
+
+            // Load Image Auto Align Settings
+            imgAutoAlignSortTypeDropDown.SelectedItemIndex = Properties
+                .Settings
+                .Default
+                .imgAutoAlignSortType;
+            imgAutoAlign_colNum.Text = Properties.Settings.Default.ColNum;
+            imgAutoAlign_colSpace.Text = Properties.Settings.Default.ColSpace;
+            imgAutoAlign_rowSpace.Text = Properties.Settings.Default.RowSpace;
+            imgWidthEditBpx.Text = Properties.Settings.Default.ImgWidth;
+            imgHeightEditBox.Text = Properties.Settings.Default.ImgHeight;
+            imgAutoAlignAlignTypeDropDown.SelectedItemIndex = Properties
+                .Settings
+                .Default
+                .imgAutoAlignAlignType;
+            excludeTextcheckBox.Checked = Properties.Settings.Default.imgAutoAlighExcludeText;
+            titleCenterCheckbox.Checked = Properties.Settings.Default.imgAddTitleCenter;
+            // insertMarkdown
+            toggleBackgroundCheckBox.Checked = Properties.Settings.Default.ToggleBackground;
+
+            // Add event handlers for text changed events
+            fontNameEditBox.TextChanged += SaveSettings;
+            fontSizeEditBox.TextChanged += SaveSettings;
+            distanceFromBottomEditBox.TextChanged += SaveSettings;
+            titleTextEditBox.TextChanged += SaveSettings;
+            autoGroupCheckBox.Click += SaveSettings;
+
+            labelOffsetXEditBox.TextChanged += SaveSettings;
+            labelOffsetYEditBox.TextChanged += SaveSettings;
+            labelTemplateComboBox.TextChanged += SaveSettings;
+            labelFontNameEditBox.TextChanged += SaveSettings;
+            labelFontSizeEditBox.TextChanged += SaveSettings;
+
+            imgAutoAlignSortTypeDropDown.SelectionChanged += SaveSettings;
+            imgAutoAlign_colNum.TextChanged += SaveSettings;
+            imgAutoAlign_colSpace.TextChanged += SaveSettings;
+            imgAutoAlign_rowSpace.TextChanged += SaveSettings;
+            imgWidthEditBpx.TextChanged += SaveSettings;
+            imgHeightEditBox.TextChanged += SaveSettings;
+            imgAutoAlignAlignTypeDropDown.SelectionChanged += SaveSettings;
+            excludeTextcheckBox.Click += SaveSettings;
+            titleCenterCheckbox.Click += SaveSettings;
+            labelBoldcheckBox.Click += SaveSettings;
+
+            toggleBackgroundCheckBox.Click += SaveSettings;
+            // exportImageButton.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.exportImageButton_Click); // Already set in Designer.cs
+        }
+
+        /// <summary>
+        /// 获取系统中已安装的所有字体名称（包含繁体中文、简体中文、英文字体等）
+        /// </summary>
+        private List<string> GetInstalledFontNames()
+        {
+            var fontNames = new List<string>();
+
+            // 常用推荐字体（置顶显示方便快速选取，包含繁中/简中/英文字体）
+            var commonFonts = new List<string>
+            {
+                "微軟正黑體",
+                "新細明體",
+                "標楷體",
+                "微软雅黑",
+                "黑体",
+                "楷体",
+                "宋体",
+                "Arial",
+                "Times New Roman",
+                "Calibri",
+                "Segoe UI"
+            };
+
+            try
+            {
+                using (var installedFonts = new InstalledFontCollection())
+                {
+                    var systemFonts = installedFonts.Families
+                        .Select(f => f.Name)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .Distinct()
+                        .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+                        .ToList();
+
+                    // 先添加系统已安装的常用字体（置顶）
+                    foreach (var font in commonFonts)
+                    {
+                        if (systemFonts.Contains(font, StringComparer.OrdinalIgnoreCase))
+                        {
+                            fontNames.Add(font);
+                        }
+                    }
+
+                    // 再添加系统中所有其他已安装的字体（去重）
+                    foreach (var font in systemFonts)
+                    {
+                        if (!fontNames.Contains(font, StringComparer.OrdinalIgnoreCase))
+                        {
+                            fontNames.Add(font);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                fontNames = commonFonts;
+            }
+
+            if (fontNames.Count == 0)
+            {
+                fontNames = commonFonts;
+            }
+
+            return fontNames;
+        }
+
+        /// <summary>
+        /// 初始化下拉框的值
+        /// </summary>
+        public void iniCombobox()
+        {
+            // 字体名（动态获取系统中安装的所有字体，包含繁体中文及其他自定义字体）
+            List<string> FontNames = GetInstalledFontNames();
+            FreshCombobox(fontNameEditBox, FontNames);
+            FreshCombobox(labelFontNameEditBox, FontNames);
+            //字号
+            List<string> FontSizes = new List<string>()
+            {
+                "2",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15",
+                "16",
+                "18",
+                "20",
+                "22",
+                "24",
+                "26",
+                "28",
+                "30",
+                "40",
+                "50",
+                "60",
+                "80",
+                "100",
+                "120",
+                "150",
+                "200",
+            };
+            FreshCombobox(fontSizeEditBox, FontSizes);
+            FreshCombobox(labelFontSizeEditBox, FontSizes);
+            //图片宽度和高度
+            List<string> PicSizes = new List<string>()
+            {
+                "0cm",
+                "0.5cm",
+                "1cm",
+                "2cm",
+                "3cm",
+                "4cm",
+                "5cm",
+                "6cm",
+                "7cm",
+                "8cm",
+                "9cm",
+                "10cm",
+                "12cm",
+                "15cm",
+                "20cm",
+                "25cm",
+                "30cm",
+                "35cm",
+                "40cm",
+                "45cm",
+                "50cm",
+                "60cm",
+                "70cm",
+                "80cm",
+                "100cm",
+                "120cm",
+                "150cm",
+                "200cm",
+            };
+            FreshCombobox(imgWidthEditBpx, PicSizes);
+            FreshCombobox(imgHeightEditBox, PicSizes);
+            //图下距离
+            List<string> PicDistance = new List<string>()
+            {
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15",
+                "20",
+                "25",
+                "30",
+                "35",
+                "40",
+                "45",
+                "50",
+                "55",
+                "60",
+                "65",
+                "70",
+                "75",
+                "80",
+                "90",
+                "100",
+                "120",
+                "150",
+                "200",
+                "500",
+            };
+            FreshCombobox(distanceFromBottomEditBox, PicDistance);
+            //XY偏移
+            List<string> OffsetValues = new List<string>()
+            {
+                "-40",
+                "-30",
+                "-20",
+                "-10",
+                "-15",
+                "-10",
+                "-9",
+                "-8",
+                "-7",
+                "-6",
+                "-5",
+                "-4",
+                "-3",
+                "-2",
+                "-1",
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "10",
+                "15",
+                "20",
+                "25",
+                "30",
+                "40",
+            };
+            //列间距
+            List<string> columnGap = new List<string>()
+            {
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15",
+                "16",
+                "17",
+                "18",
+                "19",
+                "20",
+                "21",
+                "22",
+                "23",
+                "24",
+                "25",
+                "30",
+                "35",
+                "40",
+                "45",
+                "50",
+                "55",
+                "60",
+                "80",
+            };
+            FreshCombobox(imgAutoAlign_colSpace, columnGap);
+            //行间距
+            List<string> RowGap = new List<string>()
+            {
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15",
+                "16",
+                "17(≈08字框高)",
+                "18(≈09字框高)",
+                "20(≈10字框高)",
+                "22(≈12字框高)",
+                "25(≈14字框高)",
+                "27(≈16字框高)",
+                "29(≈18字框高)",
+                "32(≈20字框高)",
+                "34(≈22字框高)",
+                "37(≈24字框高)",
+                "39(≈26字框高)",
+                "41(≈28字框高)",
+                "44(≈30字框高)",
+                "51(≈35字框高)",
+                "56(≈40字框高)",
+                "68(≈50字框高)",
+                "80(≈60字框高)",
+            };
+            FreshCombobox(imgAutoAlign_rowSpace, RowGap);
+            //列数量
+            List<string> columNums = new List<string>()
+            {
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15",
+                "16",
+                "17",
+                "18",
+                "19",
+                "20",
+            };
+            FreshCombobox(imgAutoAlign_colNum, columNums);
+        }
+
+        /// <summary>
+        /// RibbonComboBox下拉值初始化
+        /// </summary>
+        /// <param name="BOX"></param>
+        private void FreshCombobox(RibbonComboBox BOX, List<string> itemLabel)
+        {
+            BOX.Items.Clear();
+            // 使用 LINQ 创建 RibbonDropDownItem 并添加到 RibbonDropDown 中
+            itemLabel
+                .Select(x =>
+                {
+                    RibbonDropDownItem item = Globals
+                        .Factory.GetRibbonFactory()
+                        .CreateRibbonDropDownItem();
+                    item.Label = x; // 设置项的显示文本
+                    return item;
+                })
+                .ToList()
+                .ForEach(item => BOX.Items.Add(item)); // 将项添加到下拉菜单中
+        }
+
+        private void SaveSettings(object sender, RibbonControlEventArgs e)
+        {
+            // Save Image Title Settings
+            Properties.Settings.Default.TitleFontName = fontNameEditBox.Text;
+            Properties.Settings.Default.TitleFontSize = fontSizeEditBox.Text;
+            Properties.Settings.Default.TitleDistanceFromBottom = distanceFromBottomEditBox.Text;
+            Properties.Settings.Default.TitleText = titleTextEditBox.Text;
+            Properties.Settings.Default.AutoGroup = autoGroupCheckBox.Checked;
+
+            // Save Image Label Settings
+            Properties.Settings.Default.LabelOffsetX = labelOffsetXEditBox.Text;
+            Properties.Settings.Default.LabelOffsetY = labelOffsetYEditBox.Text;
+            Properties.Settings.Default.LabelTemplate = labelTemplateComboBox.Text;
+            Properties.Settings.Default.LabelFontName = labelFontNameEditBox.Text;
+            Properties.Settings.Default.LabelFontSize = labelFontSizeEditBox.Text;
+            Properties.Settings.Default.LabelBold = labelBoldcheckBox.Checked;
+            // Save Image Auto Align Settings
+            Properties.Settings.Default.imgAutoAlignSortType =
+                imgAutoAlignSortTypeDropDown.SelectedItemIndex;
+            Properties.Settings.Default.ColNum = imgAutoAlign_colNum.Text;
+            Properties.Settings.Default.ColSpace = imgAutoAlign_colSpace.Text;
+            Properties.Settings.Default.RowSpace = imgAutoAlign_rowSpace.Text;
+            Properties.Settings.Default.ImgWidth = imgWidthEditBpx.Text;
+            Properties.Settings.Default.ImgHeight = imgHeightEditBox.Text;
+            Properties.Settings.Default.imgAutoAlignAlignType =
+                imgAutoAlignAlignTypeDropDown.SelectedItemIndex;
+            Properties.Settings.Default.imgAutoAlighExcludeText = excludeTextcheckBox.Checked;
+            Properties.Settings.Default.imgAddTitleCenter = titleCenterCheckbox.Checked;
+            // Save insertMarkdwon
+            Properties.Settings.Default.ToggleBackground = toggleBackgroundCheckBox.Checked;
+
+            // 保存导出设置 (如果将来添加UI控件进行修改)
+            // Properties.Settings.Default.ExportFormat = exportFormatComboBox.Text;
+            // Properties.Settings.Default.ExportDPI = int.Parse(exportDpiEditBox.Text);
+
+            // TextChanged fires for every keystroke. Persist after a short quiet
+            // period so editing a value does not synchronously write to disk.
+            ScheduleSettingsSave();
+
+            // 弹窗显示已保存
+            // MessageBox.Show("设置已保存");
+        }
+
+        private void ScheduleSettingsSave()
+        {
+            if (settingsSaveTimer == null)
+            {
+                PersistSettings();
+                return;
+            }
+
+            settingsSaveTimer.Stop();
+            settingsSaveTimer.Start();
+        }
+
+        private void PersistSettings()
+        {
+            try
+            {
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"保存插件设置失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 图片加标题
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void AddTitleToImage(object sender, RibbonControlEventArgs e)
+        {
+            AddTitleFun(true);
+        }
+        private void AddTopTitleToImage(object sender, RibbonControlEventArgs e)
+        {
+            AddTitleFun(false);
+        }
+
+
+    /// <summary>
+    /// 图片加标题
+    /// </summary>
+    /// <param name="isBottomTitle">true为下标题，false为上标题</param>
+    private void AddTitleFun(bool isBottomTitle = true)
+    {
+        if (!TryGetActiveSlide(out Slide slide))
+        {
+            MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        if (!PowerPointContext.TryGetActiveSelection(app, out Selection sel))
+        {
+            MessageBox.Show("无法读取当前选择。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        bool autoGroup = autoGroupCheckBox.Checked; // 自动编组
+        List<ShapeRange> allshapesName = new List<ShapeRange>(); // 需要编组的对象集合
+        List<Shape> allshapes = new List<Shape>(); // 编组后的对象
+
+        if (sel.Type == PpSelectionType.ppSelectionShapes)
+        {
+            if (!TryParseFloat(fontSizeEditBox.Text, out float fontSize) || fontSize <= 0)
+            {
+                MessageBox.Show("请输入有效的字体大小。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!TryParseFloat(distanceFromBottomEditBox.Text, out float distanceFromBottom))
+            {
+                MessageBox.Show("请输入有效的图片标题间距。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string fontName = fontNameEditBox.Text; // 字体名称
+            string titleText = titleTextEditBox.Text; // 标题文本
+            int count = 1;
+            float tolerance = 10f; // 通常图片排列错位容差，10就够用
+            ShapeRange sortedSelection = GetSortedSelection(sel, tolerance);
+            var selectedImgShape = new List<Shape>();
+
+            foreach (Shape shape in (sortedSelection ?? sel.ShapeRange))
+            {
+                selectedImgShape.Add(shape);
+            }
+
+            foreach (Shape selectedShape in selectedImgShape)
+            {
+                try
+                {
+                    // 根据参数决定标题位置
+                    float titleTop;
+                    if (isBottomTitle)
+                    {
+                        // 下标题：图片底部 + 距离
+                        titleTop = selectedShape.Top + selectedShape.Height + distanceFromBottom;
+                    }
+                    else
+                    {
+                        // 上标题：图片顶部 - 标题高度 - 距离
+                        titleTop = selectedShape.Top - (fontSize * 2) - distanceFromBottom;
+                    }
+
+                    Shape titleShape = slide.Shapes.AddTextbox(
+                        Office.MsoTextOrientation.msoTextOrientationHorizontal,
+                        selectedShape.Left,
+                        titleTop,
+                        selectedShape.Width,
+                        fontSize * 2
+                    );
+
+                    // 设置标题文本和格式
+                    titleShape.TextFrame.TextRange.Text = titleText;
+                    titleShape.TextFrame.TextRange.Font.Size = fontSize;
+                    titleShape.TextFrame.TextRange.Font.NameFarEast = fontName; // Ensure FarEast font is set
+                    titleShape.TextFrame.TextRange.Font.Name = fontName; // Ensure font is set
+                    // 标题是否居中
+                    if (titleCenterCheckbox.Checked)
+                    {
+                        titleShape.TextFrame.TextRange.ParagraphFormat.Alignment = PpParagraphAlignment.ppAlignCenter;
+                    }
+                    else{
+                        titleShape.TextFrame.TextRange.ParagraphFormat.Alignment = PpParagraphAlignment.ppAlignLeft;
+
+                    }
+
+
+                    // 形状中的文字是否自动换行
+                    titleShape.TextFrame.WordWrap = Office.MsoTriState.msoTrue;
+                    // 自动调整文本框大小
+                    titleShape.TextFrame.AutoSize = PpAutoSize.ppAutoSizeShapeToFitText;
+
+                    // 设置文本框宽度
+                    titleShape.Width = selectedShape.Width;
+                    titleShape.Left = selectedShape.Left; // 设置文本框左对齐
+
+                    allshapesName.Add(
+                        slide.Shapes.Range(new string[] { selectedShape.Name, titleShape.Name })
+                    );
+
+                    // 自动选择
+                    if (count == 1)
+                    {
+                        titleShape.Select(Office.MsoTriState.msoTrue);
+                    }
+                    else
+                    {
+                        titleShape.Select(Office.MsoTriState.msoFalse);
+                    }
+                    count++;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        $"为对象 '{selectedShape.Name}' 添加标题时出错: {ex.Message}"
+                    );
+                    continue; // 继续处理下一个对象
+                }
+            }
+
+            if (selectedImgShape.Count == 0)
+            {
+                MessageBox.Show("请选择要添加标题的对象。");
+                return;
+            }
+        }
+        else
+        {
+            MessageBox.Show("请选择要添加标题的对象。");
+        }
+
+        // 自动编组
+        if (autoGroup)
+        {
+            foreach (var shapeRange2 in allshapesName)
+            {
+                Shape GroupObj;
+                try
+                {
+                    GroupObj = shapeRange2.Group();
+                    allshapes.Add(GroupObj);
+                    SelectMultipleShapes(allshapes);
+                }
+                catch
+                {
+                    try
+                    {
+                        shapeRange2.Copy();
+                        shapeRange2.Delete();
+
+                        ShapeRange pastedShapes = slide.Shapes.Paste();
+
+                        GroupObj = pastedShapes.Group();
+                        allshapes.Add(GroupObj);
+                        SelectMultipleShapes(allshapes);
+                    }
+                    catch (Exception innerEx)
+                    {
+                        MessageBox.Show($"编组失败：{innerEx.Message}");
+                        continue;
+                    }
+                }
+        }
+    }
+}
+
+        private void App_WindowSelectionChange(Selection Sel)
+        {
+            try
+            {
+                if (Sel.Type != PpSelectionType.ppSelectionShapes)
+                {
+                    selectedShapeIdsByOrder.Clear();
+                }
+                else
+                {
+                    // Get IDs of all currently selected shapes
+                    HashSet<int> currentIds = new HashSet<int>();
+                    foreach (Shape shape in Sel.ShapeRange)
+                    {
+                        currentIds.Add(shape.Id);
+                    }
+
+                    // Remove IDs that are no longer selected
+                    selectedShapeIdsByOrder.RemoveAll(id => !currentIds.Contains(id));
+
+                    // Add new IDs that are selected but not yet in our ordered list
+                    foreach (Shape shape in Sel.ShapeRange)
+                    {
+                        if (!selectedShapeIdsByOrder.Contains(shape.Id))
+                        {
+                            selectedShapeIdsByOrder.Add(shape.Id);
+                        }
+                    }
+                }
+
+                // Notify SpacingForm if it is open
+                if (spacingForm != null && !spacingForm.IsDisposed)
+                {
+                    spacingForm.OnSelectionChanged();
+                }
+
+                // Notify ScaleForm if it is open
+                if (scaleForm != null && !scaleForm.IsDisposed)
+                {
+                    scaleForm.OnSelectionChanged();
+                }
+            }
+            catch (Exception)
+            {
+                // Ignore any potential COM errors during selection change
+            }
+        }
+
+        private Shape GetFirstSelectedShape(Selection sel)
+        {
+            if (selectedShapeIdsByOrder.Count > 0)
+            {
+                int firstId = selectedShapeIdsByOrder[0];
+                foreach (Shape shape in sel.ShapeRange)
+                {
+                    if (shape.Id == firstId)
+                    {
+                        return shape;
+                    }
+                }
+            }
+            // Fallback: if not found, return the first shape in ShapeRange (1-indexed in Interop)
+            return sel.ShapeRange[1];
+        }
+
+
+
+        /// <summary>
+        /// 选择集排序
+        /// </summary>
+        /// <param name="initialSelection">原始选择集</param>
+        /// <returns></returns>
+        public ShapeRange GetSortedSelection(Selection initialSelection, float tolerance)
+        {
+            try
+            {
+                // 确保选择集中有形状对象
+                if (initialSelection.ShapeRange.Count == 0)
+                {
+                    MessageBox.Show("初始选择集中未包含任何形状。");
+                    return null;
+                }
+
+                // 将选择集中的形状转换为 List<PowerPoint.Shape>
+                List<Shape> shapes = initialSelection.ShapeRange.Cast<Shape>().ToList();
+
+                // 先按行分组，再在每一行中按 X 坐标排序。
+                // 仅对 Top 做 OrderBy 会把同一行中有轻微偏差的对象拆散，
+                // 而原实现对 tolerance 的加法并没有真正产生容差效果。
+                var rows = new List<List<Shape>>();
+                foreach (Shape shape in shapes.OrderBy(shape => shape.Top).ThenBy(shape => shape.Left))
+                {
+                    List<Shape> matchingRow = rows
+                        .OrderBy(row => Math.Abs(row[0].Top - shape.Top))
+                        .FirstOrDefault(row => Math.Abs(row[0].Top - shape.Top) <= tolerance);
+
+                    if (matchingRow == null)
+                    {
+                        matchingRow = new List<Shape>();
+                        rows.Add(matchingRow);
+                    }
+                    matchingRow.Add(shape);
+                }
+
+                var sortedShapes = rows
+                    .OrderBy(row => row.Min(shape => shape.Top))
+                    .SelectMany(row => row.OrderBy(shape => shape.Left))
+                    .ToList();
+
+                // 将排序后的形状转换为 ShapeRange
+                object[] shapeNames = sortedShapes.Select(shape => (object)shape.Name).ToArray();
+                ShapeRange sortedShapeRange = initialSelection
+                    .ShapeRange[1]
+                    .Parent.Shapes.Range(shapeNames);
+
+                return sortedShapeRange;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"排序失败：{ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 选择多个对象
+        /// </summary>
+        /// <param name="shapeNames"></param>
+        public void SelectMultipleShapes(List<Shape> shapesToSelect)
+        {
+            try
+            {
+                // 获取当前 PowerPoint 应用实例
+                PowerPoint.Application pptApp = Globals.ThisAddIn.Application;
+
+                // 检查是否处于普通视图
+                if (pptApp.ActiveWindow.View.Type != PpViewType.ppViewNormal)
+                {
+                    MessageBox.Show("请切换到普通视图以操作形状。");
+                    return;
+                }
+
+                // 获取当前幻灯片
+                Slide currentSlide = pptApp.ActiveWindow.View.Slide as Slide;
+                if (currentSlide == null)
+                {
+                    MessageBox.Show("未找到活动幻灯片。");
+                    return;
+                }
+
+                // 提取形状名称列表
+                List<object> shapeNames = new List<object>();
+                foreach (Shape shape in shapesToSelect)
+                {
+                    shapeNames.Add((object)shape.Name);
+                }
+
+                // 选中所有形状
+                if (shapeNames.Count > 0)
+                {
+                    ShapeRange selectedShapes = currentSlide.Shapes.Range(shapeNames.ToArray());
+                    selectedShapes.Select();
+                    pptApp.ActiveWindow.Activate(); // 确保窗口焦点
+                }
+                else
+                {
+                    MessageBox.Show("未提供有效的形状列表。");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"操作失败：{ex.Message}");
+            }
+        }
+
+        private void pasteImgWidthHeight_Click(object sender, RibbonControlEventArgs e)
+        {
+            if (copiedWidth <= 0 || copiedHeight <= 0)
+            {
+                MessageBox.Show("Invalid copied dimensions. Please copy the dimensions again.");
+                return;
+            }
+
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                foreach (Shape shape in sel.ShapeRange)
+                {
+                    shape.Width = copiedWidth;
+                    shape.Height = copiedHeight;
+                }
+            }
+            else
+            {
+                MessageBox.Show("Please select an image to paste dimensions.");
+            }
+        }
+
+        private void copyImgWidthHeight_Click(object sender, RibbonControlEventArgs e)
+        {
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                Shape shape = sel.ShapeRange[1];
+                copiedWidth = shape.Width;
+                copiedHeight = shape.Height;
+                // MessageBox.Show("Image dimensions copied!");
+            }
+            else
+            {
+                MessageBox.Show("Please select an image to copy dimensions.");
+            }
+        }
+
+        private void copyImgWidth_Click(object sender, RibbonControlEventArgs e)
+        {
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                Shape shape = sel.ShapeRange[1];
+                copiedWidth = shape.Width;
+                // MessageBox.Show("Image width copied!");
+            }
+            else
+            {
+                MessageBox.Show("Please select an image to copy width.");
+            }
+        }
+
+        private void pasteImgWidth_Click(object sender, RibbonControlEventArgs e)
+        {
+            if (copiedWidth <= 0)
+            {
+                MessageBox.Show("Invalid copied width. Please copy the width again.");
+                return;
+            }
+
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                foreach (Shape shape in sel.ShapeRange)
+                {
+                    shape.LockAspectRatio = Office.MsoTriState.msoTrue; // Lock aspect ratio
+                    shape.Width = copiedWidth;
+                }
+            }
+            else
+            {
+                MessageBox.Show("Please select an image to paste width.");
+            }
+        }
+
+        private void copyImgHeight_Click(object sender, RibbonControlEventArgs e)
+        {
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                Shape shape = sel.ShapeRange[1];
+                copiedHeight = shape.Height;
+                // MessageBox.Show("Image height copied!");
+            }
+            else
+            {
+                MessageBox.Show("Please select an image to copy height.");
+            }
+        }
+
+        private void pasteImgHeight_Click(object sender, RibbonControlEventArgs e)
+        {
+            if (copiedHeight <= 0)
+            {
+                MessageBox.Show("Invalid copied height. Please copy the height again.");
+                return;
+            }
+
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                foreach (Shape shape in sel.ShapeRange)
+                {
+                    shape.LockAspectRatio = Office.MsoTriState.msoTrue; // Lock aspect ratio
+                    shape.Height = copiedHeight;
+                }
+            }
+            else
+            {
+                MessageBox.Show("Please select an image to paste height.");
+            }
+        }
+
+        private void copyPosition_Click(object sender, RibbonControlEventArgs e)
+        {
+            CopyPositionInternal(lastCopiedAlignment);
+        }
+
+        private void copyPositionWithAlignment_Click(object sender, RibbonControlEventArgs e)
+        {
+            var button = sender as Microsoft.Office.Tools.Ribbon.RibbonButton;
+            if (button == null) return;
+
+            AlignmentPosition alignment = AlignmentPosition.Center;
+            switch (button.Name)
+            {
+                case "copyPosTopLeft":
+                    alignment = AlignmentPosition.TopLeft;
+                    break;
+                case "copyPosTopCenter":
+                    alignment = AlignmentPosition.TopCenter;
+                    break;
+                case "copyPosTopRight":
+                    alignment = AlignmentPosition.TopRight;
+                    break;
+                case "copyPosMiddleLeft":
+                    alignment = AlignmentPosition.MiddleLeft;
+                    break;
+                case "copyPosCenter":
+                    alignment = AlignmentPosition.Center;
+                    break;
+                case "copyPosMiddleRight":
+                    alignment = AlignmentPosition.MiddleRight;
+                    break;
+                case "copyPosBottomLeft":
+                    alignment = AlignmentPosition.BottomLeft;
+                    break;
+                case "copyPosBottomCenter":
+                    alignment = AlignmentPosition.BottomCenter;
+                    break;
+                case "copyPosBottomRight":
+                    alignment = AlignmentPosition.BottomRight;
+                    break;
+            }
+
+            lastCopiedAlignment = alignment;
+            CopyPositionInternal(alignment);
+        }
+
+        private void CopyPositionInternal(AlignmentPosition alignment)
+        {
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                copiedLeft.Clear();
+                copiedTop.Clear();
+                foreach (Shape shape in sel.ShapeRange)
+                {
+                    var pt = GetShapeAlignmentPoint(shape, alignment);
+                    copiedLeft.Add(pt.X);
+                    copiedTop.Add(pt.Y);
+                }
+            }
+            else
+            {
+                MessageBox.Show("Please select shapes to copy positions.");
+            }
+        }
+
+        private void pastePosition_Click(object sender, RibbonControlEventArgs e)
+        {
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                int count = Math.Min(sel.ShapeRange.Count, copiedLeft.Count);
+                if (count == 0)
+                {
+                    MessageBox.Show("No positions copied yet.");
+                    return;
+                }
+
+                for (int i = 0; i < count; i++)
+                {
+                    Shape shape = sel.ShapeRange[i + 1];
+                    SetShapeAlignmentPoint(shape, lastCopiedAlignment, copiedLeft[i], copiedTop[i]);
+                }
+            }
+            else
+            {
+                MessageBox.Show("Please select shapes to paste positions.");
+            }
+        }
+
+        private void swapPosition_Click(object sender, RibbonControlEventArgs e)
+        {
+            SwapPositionInternal(lastSwapAlignment);
+        }
+
+        private void swapPositionWithAlignment_Click(object sender, RibbonControlEventArgs e)
+        {
+            var button = sender as Microsoft.Office.Tools.Ribbon.RibbonButton;
+            if (button == null) return;
+
+            AlignmentPosition alignment = AlignmentPosition.TopLeft;
+            switch (button.Name)
+            {
+                case "swapPosTopLeft":
+                    alignment = AlignmentPosition.TopLeft;
+                    break;
+                case "swapPosTopCenter":
+                    alignment = AlignmentPosition.TopCenter;
+                    break;
+                case "swapPosTopRight":
+                    alignment = AlignmentPosition.TopRight;
+                    break;
+                case "swapPosMiddleLeft":
+                    alignment = AlignmentPosition.MiddleLeft;
+                    break;
+                case "swapPosCenter":
+                    alignment = AlignmentPosition.Center;
+                    break;
+                case "swapPosMiddleRight":
+                    alignment = AlignmentPosition.MiddleRight;
+                    break;
+                case "swapPosBottomLeft":
+                    alignment = AlignmentPosition.BottomLeft;
+                    break;
+                case "swapPosBottomCenter":
+                    alignment = AlignmentPosition.BottomCenter;
+                    break;
+                case "swapPosBottomRight":
+                    alignment = AlignmentPosition.BottomRight;
+                    break;
+            }
+
+            lastSwapAlignment = alignment;
+            SwapPositionInternal(alignment);
+        }
+
+        private void SwapPositionInternal(AlignmentPosition alignment)
+        {
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes && sel.ShapeRange.Count == 2)
+            {
+                Shape shape1 = sel.ShapeRange[1];
+                Shape shape2 = sel.ShapeRange[2];
+
+                var pt1 = GetShapeAlignmentPoint(shape1, alignment);
+                var pt2 = GetShapeAlignmentPoint(shape2, alignment);
+
+                SetShapeAlignmentPoint(shape1, alignment, pt2.X, pt2.Y);
+                SetShapeAlignmentPoint(shape2, alignment, pt1.X, pt1.Y);
+            }
+            else
+            {
+                MessageBox.Show("请选择两个图形以交换位置。");
+            }
+        }
+
+        private void alignHorizontalCenter_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Selection sel = app.ActiveWindow.Selection;
+                if (sel.Type == PpSelectionType.ppSelectionShapes && sel.ShapeRange.Count > 0)
+                {
+                    if (sel.ShapeRange.Count == 1)
+                    {
+                        Shape shape = sel.ShapeRange[1];
+                        shape.Left = (app.ActivePresentation.PageSetup.SlideWidth - shape.Width) / 2f;
+                    }
+                    else
+                    {
+                        Shape firstShape = GetFirstSelectedShape(sel);
+                        float refX = firstShape.Left + firstShape.Width / 2f;
+
+                        foreach (Shape shape in sel.ShapeRange)
+                        {
+                            if (shape.Id != firstShape.Id)
+                            {
+                                shape.Left = refX - shape.Width / 2f;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("请先选择要对齐的形状。");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"对齐过程中出错: {ex.Message}");
+            }
+        }
+
+        private void alignVerticalCenter_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Selection sel = app.ActiveWindow.Selection;
+                if (sel.Type == PpSelectionType.ppSelectionShapes && sel.ShapeRange.Count > 0)
+                {
+                    if (sel.ShapeRange.Count == 1)
+                    {
+                        Shape shape = sel.ShapeRange[1];
+                        shape.Top = (app.ActivePresentation.PageSetup.SlideHeight - shape.Height) / 2f;
+                    }
+                    else
+                    {
+                        Shape firstShape = GetFirstSelectedShape(sel);
+                        float refY = firstShape.Top + firstShape.Height / 2f;
+
+                        foreach (Shape shape in sel.ShapeRange)
+                        {
+                            if (shape.Id != firstShape.Id)
+                            {
+                                shape.Top = refY - shape.Height / 2f;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("请先选择要对齐的形状。");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"对齐过程中出错: {ex.Message}");
+            }
+        }
+
+        private void setSpacingButton_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                if (spacingForm == null || spacingForm.IsDisposed)
+                {
+                    spacingForm = new SpacingForm(app, selectedShapeIdsByOrder);
+                    spacingForm.Show();
+                }
+                else
+                {
+                    spacingForm.Activate();
+                    spacingForm.RefreshSelection();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"打开间距设置窗口失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 图片排列
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void imgAutoAlign_Click(object sender, RibbonControlEventArgs e)
+        {
+            AlignPics();
+        }
+
+        /// <summary>
+        /// 解析厘米(cm)字符串并转换为PowerPoint点数(Points)
+        /// 1 cm = 72 / 2.54 = 28.3464593 点
+        /// </summary>
+        private bool TryParseCmToPoints(string text, out float points)
+        {
+            points = 0f;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            // 移除 cm, CM, 厘米 等单位字符并清理空格
+            string cleanText = Regex.Replace(text.Trim(), @"(?i)cm|厘米|\s", "");
+            if (TryParseFloat(cleanText, out float cmValue) && cmValue > 0)
+            {
+                points = (float)(cmValue * 28.3464593);
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 图片对齐排列
+        /// </summary>
+        private void AlignPics(bool showValidationErrors = true)
+        {
+            if (!TryGetActiveSlide(out Slide activeSlide))
+            {
+                if (showValidationErrors)
+                {
+                    MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                return;
+            }
+
+            if (!PowerPointContext.TryGetActiveSelection(app, out Selection sel))
+            {
+                if (showValidationErrors)
+                {
+                    MessageBox.Show("无法读取当前选择。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                return;
+            }
+
+            if (sel == null || sel.Type != PpSelectionType.ppSelectionShapes || sel.ShapeRange.Count == 0)
+            {
+                if (showValidationErrors)
+                {
+                    MessageBox.Show("请选择要对齐的图片。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                return;
+            }
+
+            int colNum;
+            float colSpace;
+            float rowSpace;
+            float customWidth = 0;
+            float customHeight = 0;
+
+            // Input validation
+            if (!int.TryParse(imgAutoAlign_colNum.Text, out colNum) || colNum <= 0)
+            {
+                if (showValidationErrors)
+                {
+                    MessageBox.Show("请输入有效的列数量。");
+                }
+                return;
+            }
+
+            if (!TryParseFloat(imgAutoAlign_colSpace.Text, out colSpace) || colSpace < 0)
+            {
+                if (showValidationErrors)
+                {
+                    MessageBox.Show("请输入有效的列间距。");
+                }
+                return;
+            }
+
+            string rowSpaceText = imgAutoAlign_rowSpace.Text ?? string.Empty;
+            string rowSpaceNumber = rowSpaceText.Split(new char[] { '(', ' ', '≈' })[0];
+            if (!TryParseFloat(rowSpaceNumber, out rowSpace) || rowSpace < 0)
+            {
+                rowSpace = colSpace;
+            }
+
+            bool useCustomWidth = TryParseCmToPoints(imgWidthEditBpx.Text, out customWidth);
+            bool useCustomHeight = TryParseCmToPoints(imgHeightEditBox.Text, out customHeight);
+            var selectedImgShape = new List<Shape>();
+            foreach (Shape shape in sel.ShapeRange)
+            {
+                // Skip text boxes if excludeTextcheckBox is checked
+                Office.MsoShapeType objType = shape.Type;
+                if (
+                    excludeTextcheckBox.Checked
+                    && (
+                        objType is Office.MsoShapeType.msoTextBox
+                        || objType is Office.MsoShapeType.msoAutoShape
+                        || objType is Office.MsoShapeType.msoMedia
+                    )
+                )
+                {
+                    continue;
+                }
+                selectedImgShape.Add(shape);
+            }
+
+            if (selectedImgShape.Count == 0)
+            {
+                if (showValidationErrors)
+                {
+                    MessageBox.Show("当前选择中没有可排列的图片对象。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                return;
+            }
+
+            List<Shape> shapesToArrange = new List<Shape>();
+
+                if (imgAutoAlignSortTypeDropDown.SelectedItemIndex == 0)
+                {
+                    // Create groups based on vertical position
+                    var groups = new List<ImageGroup>();
+                    var shapes = new List<Shape>();
+                    foreach (Shape shape in selectedImgShape)
+                    {
+                        shapes.Add(shape);
+                    }
+
+                    // Group shapes based on vertical overlap
+                    foreach (var shape in shapes)
+                    {
+                        bool addedToExistingGroup = false;
+                        foreach (var group in groups)
+                        {
+                            if (group.OverlapsWith(shape))
+                            {
+                                group.AddShape(shape);
+                                addedToExistingGroup = true;
+                                break;
+                            }
+                        }
+
+                        if (!addedToExistingGroup)
+                        {
+                            var newGroup = new ImageGroup();
+                            newGroup.AddShape(shape);
+                            groups.Add(newGroup);
+                        }
+                    }
+
+                    // Sort shapes within each group by x position
+                    foreach (var group in groups)
+                    {
+                        group.Shapes.Sort((a, b) => a.Left.CompareTo(b.Left));
+                    }
+
+                    // Sort groups by MinTop
+                    groups.Sort((a, b) => a.MinTop.CompareTo(b.MinTop));
+
+                    // Flatten all shapes from all groups into a single list for arrangement
+                    foreach (var group in groups)
+                    {
+                        shapesToArrange.AddRange(group.Shapes);
+                    }
+                }
+                else
+                {
+                    // Use shapes in their original order
+                    foreach (Shape shape in selectedImgShape)
+                    {
+                        shapesToArrange.Add(shape);
+                    }
+                }
+
+                if (shapesToArrange.Count == 0)
+                {
+                    if (showValidationErrors)
+                    {
+                        MessageBox.Show("当前选择中没有可排列的图片对象。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    return;
+                }
+
+                // Now Align image
+                float startX = shapesToArrange[0].Left;
+                float startY = shapesToArrange[0].Top;
+                float currentY = shapesToArrange[0].Top;
+
+                if (imgAutoAlignAlignTypeDropDown.SelectedItemIndex == 0)
+                {
+                    // 1. 预先将图片分配到列
+                    List<List<Shape>> columns = new List<List<Shape>>();
+                    for (int i = 0; i < colNum; i++)
+                    {
+                        columns.Add(new List<Shape>());
+                    }
+
+                    for (int i = 0; i < shapesToArrange.Count; i++)
+                    {
+                        columns[i % colNum].Add(shapesToArrange[i]); // 按顺序分配到列
+                    }
+
+                    // 2. 计算每列的最大宽度
+                    List<float> columnWidths = new List<float>();
+                    for (int i = 0; i < colNum; i++)
+                    {
+                        float columnMaxWidth = 0;
+                        foreach (var shape in columns[i])
+                        {
+                            float aspectRatio = shape.Width / shape.Height;
+
+                            if (useCustomWidth && !useCustomHeight)
+                            {
+                                shape.Width = customWidth;
+                                shape.Height = customWidth / aspectRatio;
+                            }
+                            else if (!useCustomWidth && useCustomHeight)
+                            {
+                                shape.Height = customHeight;
+                                shape.Width = customHeight * aspectRatio;
+                            }
+                            else if (useCustomWidth && useCustomHeight)
+                            {
+                                // 取消锁定纵横比 (假设 Shape 类有 LockAspectRatio 属性)
+                                // shape.LockAspectRatio = Office.MsoTriState.msoFalse; // 如果使用 Office Interop
+                                shape.Width = customWidth;
+                                shape.Height = customHeight;
+                            }
+                            columnMaxWidth = Math.Max(columnMaxWidth, shape.Width);
+                        }
+                        columnWidths.Add(columnMaxWidth);
+                    }
+                    float currentX = startX;
+                    float rowMaxHeight = 0;
+                    int colCount = 0;
+                    // 3. 按行进行排列
+                    foreach (var shape in shapesToArrange)
+                    {
+                        float aspectRatio = shape.Width / shape.Height;
+                        if (useCustomWidth && !useCustomHeight)
+                        {
+                            shape.Width = customWidth;
+                            shape.Height = customWidth / aspectRatio;
+                        }
+                        else if (!useCustomWidth && useCustomHeight)
+                        {
+                            shape.Height = customHeight;
+                            shape.Width = customHeight * aspectRatio;
+                            // referenceHeight = customHeight;
+                            // 需要计算最大占位宽度
+                        }
+                        else if (useCustomWidth && useCustomHeight)
+                        {
+                            // 取消锁定纵横比
+                            shape.LockAspectRatio = Office.MsoTriState.msoFalse;
+                            shape.Width = customWidth;
+                            shape.Height = customHeight;
+                        }
+
+                        if (colCount >= colNum)
+                        {
+                            colCount = 0;
+                            currentX = startX;
+                            currentY += rowMaxHeight + rowSpace;
+                            rowMaxHeight = 0;
+                        }
+
+                        shape.Left = currentX;
+                        shape.Top = currentY;
+                        rowMaxHeight = Math.Max(rowMaxHeight, shape.Height);
+                        currentX += columnWidths[colCount] + colSpace;
+                        colCount++;
+                    }
+                }
+                else if (imgAutoAlignAlignTypeDropDown.SelectedItemIndex == 1)
+                {
+                    // 统一高度排列
+                    float referenceHeight = shapesToArrange[0].Height;
+                    if (useCustomWidth && !useCustomHeight)
+                    {
+                        referenceHeight = 0;
+                    }
+                    float currentX = startX;
+                    int colCount = 0;
+
+                    foreach (var shape in shapesToArrange)
+                    {
+                        // 保持宽高比调整高度
+                        float aspectRatio = shape.Width / shape.Height;
+                        if (!useCustomWidth && !useCustomHeight)
+                        {
+                            shape.Height = referenceHeight;
+                            shape.Width = referenceHeight * aspectRatio;
+                        }
+                        else
+                        {
+                            if (useCustomWidth && !useCustomHeight)
+                            {
+                                shape.Width = customWidth;
+                                shape.Height = customWidth / aspectRatio;
+                            }
+                            else if (!useCustomWidth && useCustomHeight)
+                            {
+                                shape.Height = customHeight;
+                                shape.Width = customHeight * aspectRatio;
+                                referenceHeight = customHeight;
+                            }
+                            else
+                            {
+                                // 取消锁定纵横比
+                                shape.LockAspectRatio = Office.MsoTriState.msoFalse;
+                                shape.Width = customWidth;
+                                shape.Height = customHeight;
+                            }
+                        }
+
+                        if (colCount >= colNum)
+                        {
+                            colCount = 0;
+                            currentX = startX;
+                            currentY += referenceHeight + rowSpace;
+                            if (useCustomWidth && !useCustomHeight)
+                            {
+                                referenceHeight = 0;
+                            }
+                        }
+
+                        shape.Left = currentX;
+                        shape.Top = currentY;
+                        currentX += shape.Width + colSpace;
+                        colCount++;
+
+                        // For a custom width with preserved aspect ratios, the
+                        // next row must start below the tallest shape in this row.
+                        if (useCustomWidth && !useCustomHeight)
+                        {
+                            referenceHeight = Math.Max(referenceHeight, shape.Height);
+                        }
+                    }
+                }
+                else
+                {
+                    // 瀑布流排列：统一所有图片宽度
+                    float[] columnTops = new float[colNum];
+                    float[] columnLefts = new float[colNum];
+
+                    // 统一所有图片的宽度
+                    float uniformWidth = customWidth > 0 ? customWidth : shapesToArrange[0].Width;
+
+                    // 初始化每列的位置
+                    for (int i = 0; i < colNum; i++)
+                    {
+                        columnTops[i] = currentY;
+                        columnLefts[i] = startX + i * (uniformWidth + colSpace);
+                    }
+
+                    foreach (var shape in shapesToArrange)
+                    {
+                        // 统一宽度，保持宽高比
+                        float aspectRatio = shape.Width / shape.Height;
+                        shape.Width = uniformWidth;
+                        shape.Height = uniformWidth / aspectRatio;
+
+                        // 找到高度最小的列
+                        int minColumn = 0;
+                        float minHeight = columnTops[0];
+                        for (int i = 1; i < colNum; i++)
+                        {
+                            if (columnTops[i] < minHeight)
+                            {
+                                minHeight = columnTops[i];
+                                minColumn = i;
+                            }
+                        }
+
+                        // 放置图片
+                        shape.Left = columnLefts[minColumn];
+                        shape.Top = columnTops[minColumn];
+
+                        // 更新该列的高度，加上图片高度和行间距
+                        columnTops[minColumn] += shape.Height + rowSpace;
+                    }
+                }
+        }
+
+        private void gallery1_Click(object sender, RibbonControlEventArgs e) { }
+
+        private void insertCodeBlockButton_Click(object sender, RibbonControlEventArgs e)
+        {
+            // Create and configure input dialog
+            Form inputDialog = new Form()
+            {
+                Width = 600,
+                Height = 400,
+                Text = "插入代码块",
+                StartPosition = FormStartPosition.CenterScreen, // Center the dialog on the screen
+            };
+
+            TextBox codeInput = new TextBox()
+            {
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                Dock = DockStyle.Fill,
+                Font = new Font("Consolas", 12),
+            };
+
+            ComboBox languageSelect = new ComboBox()
+            {
+                Dock = DockStyle.Top,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+            };
+
+            // Add common programming languages
+            languageSelect.Items.AddRange(
+                new string[] { "python", "matlab", "javascript", "html", "css", "R",
+                "fortran" }
+            );
+
+            // Load default language from settings
+            string defaultLanguage = Properties.Settings.Default.selectedCodeLanguage;
+            int defaultIndex = languageSelect.Items.IndexOf(defaultLanguage);
+            if (defaultIndex >= 0)
+            {
+                languageSelect.SelectedIndex = defaultIndex;
+            }
+            else
+            {
+                languageSelect.SelectedIndex = 0; // Default to first item if not found
+            }
+
+            Button okButton = new Button()
+            {
+                Text = "确定",
+                DialogResult = DialogResult.OK,
+                Dock = DockStyle.Bottom,
+            };
+
+            // Add controls to form
+            inputDialog.Controls.AddRange(new Control[] { codeInput, languageSelect, okButton });
+
+            // Show dialog and process result
+            if (inputDialog.ShowDialog() == DialogResult.OK)
+            {
+                string code = codeInput.Text.Trim();
+                string language = languageSelect.SelectedItem.ToString();
+
+                // Save selected language to settings
+                Properties.Settings.Default.selectedCodeLanguage = language;
+                Properties.Settings.Default.Save();
+
+                if (!string.IsNullOrEmpty(code))
+                {
+                    PowerPoint.Application app = Globals.ThisAddIn.Application;
+                    Slide slide = app.ActiveWindow.View.Slide;
+
+                    Shape textBox = slide.Shapes.AddTextbox(
+                        Office.MsoTextOrientation.msoTextOrientationHorizontal,
+                        100,
+                        100,
+                        500,
+                        300
+                    );
+
+                    // Set code block style
+                    textBox.Fill.Solid();
+                    textBox.Fill.ForeColor.RGB = toggleBackgroundCheckBox.Checked
+                        ? ColorTranslator.ToOle(Color.FromArgb(30, 30, 30))
+                        : ColorTranslator.ToOle(Color.White);
+                    textBox.Line.ForeColor.RGB = ColorTranslator.ToOle(
+                        Color.FromArgb(200, 200, 200)
+                    );
+                    textBox.Line.Weight = 1;
+
+                    // Set the code without language markers
+                    textBox.TextFrame.TextRange.Text = code;
+
+                    // Apply base formatting
+                    textBox.TextFrame.TextRange.Font.Name = "Consolas";
+                    textBox.TextFrame.TextRange.Font.Size = 12;
+                    textBox.TextFrame.TextRange.Font.Color.RGB = toggleBackgroundCheckBox.Checked
+                        ? ColorTranslator.ToOle(Color.White)
+                        : ColorTranslator.ToOle(Color.Black);
+                    textBox.TextFrame.TextRange.ParagraphFormat.Alignment =
+                        PpParagraphAlignment.ppAlignLeft;
+
+                    // Set margins
+                    textBox.TextFrame.MarginLeft = 10;
+                    textBox.TextFrame.MarginRight = 10;
+                    textBox.TextFrame.MarginTop = 5;
+                    textBox.TextFrame.MarginBottom = 5;
+
+                    // Apply syntax highlighting
+                    var highlighter = new CodeHighlighter(toggleBackgroundCheckBox.Checked);
+                    highlighter.ApplyHighlighting(textBox, code, language);
+
+                    // Auto-size the textbox to fit content
+                    textBox.TextFrame.AutoSize = PpAutoSize.ppAutoSizeShapeToFitText;
+                }
+            }
+        }
+
+        private void checkBox1_Click(object sender, RibbonControlEventArgs e)
+        {
+            Selection sel = app.ActiveWindow.Selection;
+
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                foreach (Shape shape in sel.ShapeRange)
+                {
+                    if (shape.HasTextFrame == Office.MsoTriState.msoTrue)
+                    {
+                        // Update background color
+                        shape.Fill.Solid();
+                        shape.Fill.ForeColor.RGB = toggleBackgroundCheckBox.Checked
+                            ? ColorTranslator.ToOle(Color.FromArgb(30, 30, 30))
+                            : ColorTranslator.ToOle(Color.White);
+
+                        // Update text color
+                        shape.TextFrame.TextRange.Font.Color.RGB = toggleBackgroundCheckBox.Checked
+                            ? ColorTranslator.ToOle(Color.White)
+                            : ColorTranslator.ToOle(Color.Black);
+                    }
+                }
+            }
+        }
+
+        private void insertEquationButton_Click(object sender, RibbonControlEventArgs e)
+        {
+            PowerPoint.Application app = Globals.ThisAddIn.Application;
+            Slide slide = app.ActiveWindow.View.Slide;
+
+            // Prompt user for LaTeX input
+            Form inputDialog = new Form()
+            {
+                Width = 500,
+                Height = 500,
+                Text = "输入LaTeX公式",
+                StartPosition = FormStartPosition.CenterScreen, // Center the dialog on the screen
+            };
+
+            TextBox latexInputBox = new TextBox()
+            {
+                Multiline = true,
+                Dock = DockStyle.Fill,
+                Font = new Font("Consolas", 12),
+            };
+
+            Button okButton = new Button()
+            {
+                Text = "确定",
+                DialogResult = DialogResult.OK,
+                Dock = DockStyle.Bottom,
+            };
+
+            inputDialog.Controls.Add(latexInputBox);
+            inputDialog.Controls.Add(okButton);
+
+            if (inputDialog.ShowDialog() == DialogResult.OK)
+            {
+                string latexInput = latexInputBox.Text.Trim();
+
+                // Remove surrounding $...$, $$...$$, \(...\), \[...\]
+                if (latexInput.StartsWith("$") && latexInput.EndsWith("$"))
+                {
+                    latexInput = latexInput.Trim('$');
+                }
+                else if (latexInput.StartsWith("$$") && latexInput.EndsWith("$$"))
+                {
+                    latexInput = latexInput.Trim('$');
+                }
+                else if (latexInput.StartsWith(@"\(") && latexInput.EndsWith(@"\)"))
+                {
+                    latexInput = latexInput.Substring(2, latexInput.Length - 4);
+                }
+                else if (latexInput.StartsWith(@"\[") && latexInput.EndsWith(@"\]"))
+                {
+                    latexInput = latexInput.Substring(2, latexInput.Length - 4);
+                }
+
+                latexInput = latexInput.Replace("\r", "").Replace("\n", ""); // Remove line breaks
+
+                if (!string.IsNullOrEmpty(latexInput))
+                {
+                    try
+                    {
+                        // Insert a new textbox in the center of the slide
+                        Shape textBox = slide.Shapes.AddTextbox(
+                            Office.MsoTextOrientation.msoTextOrientationHorizontal,
+                            slide.Master.Width / 2 - 100,
+                            slide.Master.Height / 2 - 50,
+                            500,
+                            500
+                        );
+
+                        // Select the newly inserted textbox
+                        textBox.Select();
+                        app.ActiveWindow.Selection.TextRange.Select();
+
+                        // Run SwitchLatex
+                        app.CommandBars.ExecuteMso("EquationInsertNew");
+                        Shape equationShape = app.ActiveWindow.Selection.ShapeRange[1];
+                        equationShape
+                            .TextFrame.TextRange.Characters(
+                                1,
+                                equationShape.TextFrame.TextRange.Text.Length - 1
+                            )
+                            .Text = "\u24C9";
+
+                        app.CommandBars.ExecuteMso("EquationInsertNew");
+                        app.ActiveWindow.Selection.TextRange.Select();
+                        Shape equationShape2 = app.ActiveWindow.Selection.ShapeRange[1];
+                        // Set the LaTeX input to the equation shape
+                        equationShape2
+                            .TextFrame.TextRange.Characters(
+                                1,
+                                equationShape2.TextFrame.TextRange.Text.Length - 1
+                            )
+                            .Text = latexInput;
+
+                        // Convert to professional format
+                        app.CommandBars.ExecuteMso("EquationProfessional");
+
+                        textBox.TextFrame.AutoSize = PpAutoSize.ppAutoSizeShapeToFitText;
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("An error occurred: " + ex.Message);
+                    }
+                }
+            }
+        }
+
+        private int GetActualPosition(string text, int position)
+        {
+            return position - text.Substring(0, position).Count(c => c == '\r');
+        }
+
+        private string ConvertMarkdownToHtml(string markdown)
+        {
+            try
+            {
+                var html = Markdown.ToHtml(markdown);
+                //MessageBox.Show($"Markdown转换: {html}");
+                return html;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Markdown转换错误: {ex.Message}");
+                return markdown; // 转换失败时返回原文本
+            }
+        }
+        private void insertMarkdown_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Form inputDialog = new Form
+                {
+                    Width = 600,
+                    Height = 400,
+                    Text = "插入Markdown",
+                    StartPosition = FormStartPosition.CenterScreen,
+                };
+
+                TextBox markdownInput = new TextBox
+                {
+                    Multiline = true,
+                    ScrollBars = ScrollBars.Vertical,
+                    Dock = DockStyle.Fill,
+                    Font = new Font("Consolas", 12),
+                };
+
+                Button okButton = new Button
+                {
+                    Text = "确定",
+                    DialogResult = DialogResult.OK,
+                    Dock = DockStyle.Bottom,
+                };
+
+                inputDialog.Controls.Add(markdownInput);
+                inputDialog.Controls.Add(okButton);
+
+                DialogResult result = inputDialog.ShowDialog();
+
+                if (result == DialogResult.OK)
+                {
+                    string markdown = markdownInput.Text?.Trim() ?? "";
+                    if (!string.IsNullOrEmpty(markdown))
+                    {
+                        Slide slide = app.ActiveWindow.View.Slide;
+
+                        float currentTop = slide.Master.Height / 2; // Starting position
+                        float left = (slide.Master.Width - 500) / 2; // Center horizontally
+                        float width = 500;
+
+                        bool renderHadErrors;
+                        List<Shape> insertedShapes = RenderMarkdownToShapes(markdown, slide, left, currentTop, width, out renderHadErrors);
+
+                        if (renderHadErrors)
+                        {
+                            MessageBox.Show("部分 Markdown 内容未能插入，已保留成功生成的内容。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+
+                        if (insertedShapes.Count > 1)
+                        {
+                            try
+                            {
+                                List<string> shapeNames = insertedShapes.Select(s => s.Name).ToList();
+                                Shape group = slide.Shapes.Range(shapeNames.ToArray()).Group();
+                                group.Select();
+                            }
+                            catch (Exception)
+                            {
+                                // Ignore grouping exceptions
+                            }
+                        }
+                        else if (insertedShapes.Count == 1)
+                        {
+                            try
+                            {
+                                insertedShapes[0].Select();
+                            }
+                            catch (Exception)
+                            {
+                                // Ignore selection exceptions
+                            }
+                        }
+
+                        inputDialog.Dispose();
+                        Clipboard.Clear();
+                        var dataObject = new DataObject();
+                        dataObject.SetData(DataFormats.UnicodeText, markdown);
+                        Clipboard.SetDataObject(dataObject, true, 3, 100); // Add retry and timeout parameters
+                    }
+                }
+
+                inputDialog.Dispose();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"操作过程中出错: {ex.Message}\n\n{ex.StackTrace}");
+            }
+        }
+
+        private void textboxToRichText_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                PowerPoint.Application app = Globals.ThisAddIn.Application;
+                Selection sel = app.ActiveWindow.Selection;
+                if ((sel.Type != PpSelectionType.ppSelectionShapes && sel.Type != PpSelectionType.ppSelectionText) || sel.ShapeRange.Count == 0)
+                {
+                    MessageBox.Show("请先选择一个或多个含有Markdown内容的文本框，或将光标定位在文本框中。");
+                    return;
+                }
+
+                Slide slide = app.ActiveWindow.View.Slide;
+
+                // Collect selected shapes to avoid modification-during-iteration issues
+                List<Shape> selectedTextboxes = new List<Shape>();
+                if (sel.Type == PpSelectionType.ppSelectionShapes)
+                {
+                    foreach (Shape shape in sel.ShapeRange)
+                    {
+                        if (shape.HasTextFrame == Office.MsoTriState.msoTrue && shape.TextFrame.HasText == Office.MsoTriState.msoTrue)
+                        {
+                            selectedTextboxes.Add(shape);
+                        }
+                    }
+                }
+                else if (sel.Type == PpSelectionType.ppSelectionText)
+                {
+                    try
+                    {
+                        if (sel.ShapeRange.Count > 0)
+                        {
+                            Shape shape = sel.ShapeRange[1];
+                            if (shape.HasTextFrame == Office.MsoTriState.msoTrue && shape.TextFrame.HasText == Office.MsoTriState.msoTrue)
+                            {
+                                selectedTextboxes.Add(shape);
+                            }
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        try
+                        {
+                            dynamic parent = sel.TextRange.Parent;
+                            dynamic shape = parent.Parent;
+                            if (shape != null)
+                            {
+                                Shape pptShape = (Shape)shape;
+                                if (pptShape.HasTextFrame == Office.MsoTriState.msoTrue && pptShape.TextFrame.HasText == Office.MsoTriState.msoTrue)
+                                {
+                                    selectedTextboxes.Add(pptShape);
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                if (selectedTextboxes.Count == 0)
+                {
+                    MessageBox.Show("选中的形状或当前光标处没有包含文本的文本框。");
+                    return;
+                }
+
+                string lastMarkdown = null;
+
+                // Process each textbox
+                foreach (Shape originalShape in selectedTextboxes)
+                {
+                    string markdown = originalShape.TextFrame.TextRange.Text;
+                    if (string.IsNullOrWhiteSpace(markdown))
+                    {
+                        continue;
+                    }
+                    // Normalize line endings to Windows standard \r\n to match the input form behavior
+                    markdown = markdown.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\r\n");
+                    lastMarkdown = markdown;
+
+                    // Store original shape position and size properties
+                    float left = originalShape.Left;
+                    float top = originalShape.Top;
+                    float width = originalShape.Width;
+
+                    // Render markdown content to rich text shapes at the same position/width
+                        bool renderHadErrors;
+                        List<Shape> insertedShapes = RenderMarkdownToShapes(markdown, slide, left, top, width, out renderHadErrors);
+
+                        // Keep the original shape intact if rendering failed or produced nothing.
+                        // This makes the conversion operation recoverable instead of turning a
+                        // clipboard/COM failure into data loss.
+                        if (renderHadErrors || insertedShapes.Count == 0)
+                        {
+                            foreach (Shape insertedShape in insertedShapes)
+                            {
+                                try
+                                {
+                                    insertedShape.Delete();
+                                }
+                                catch { }
+                            }
+
+                            MessageBox.Show("Markdown 转换未完成，原文本框已保留。", "转换失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            continue;
+                        }
+
+                        // Delete the original shape only after the complete replacement succeeded.
+                        originalShape.Delete();
+
+                    // Group them if multiple shapes were created
+                    if (insertedShapes.Count > 1)
+                    {
+                        try
+                        {
+                            List<string> shapeNames = insertedShapes.Select(s => s.Name).ToList();
+                            Shape group = slide.Shapes.Range(shapeNames.ToArray()).Group();
+                            group.Select(Office.MsoTriState.msoFalse); // Do not replace selection, just select it
+                        }
+                        catch (Exception)
+                        {
+                            // Ignore grouping exceptions
+                        }
+                    }
+                    else if (insertedShapes.Count == 1)
+                    {
+                        try
+                        {
+                            insertedShapes[0].Select(Office.MsoTriState.msoFalse);
+                        }
+                        catch (Exception)
+                        {
+                            // Ignore selection exceptions
+                        }
+                    }
+                }
+
+                // Clear clipboard to be polite, and restore it with markdown content if single
+                if (selectedTextboxes.Count == 1 && !string.IsNullOrEmpty(lastMarkdown))
+                {
+                    Clipboard.Clear();
+                    var dataObject = new DataObject();
+                    dataObject.SetData(DataFormats.UnicodeText, lastMarkdown);
+                    Clipboard.SetDataObject(dataObject, true, 3, 100);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"转换过程中出错: {ex.Message}\n\n{ex.StackTrace}");
+            }
+        }
+
+        private List<Shape> RenderMarkdownToShapes(string markdown, Slide slide, float left, float top, float width, out bool hadErrors)
+        {
+            var segments = SplitMarkdownIntoSegments(markdown);
+            var insertedShapes = new List<Shape>();
+            float currentTop = top;
+            hadErrors = false;
+
+            foreach (var segment in segments)
+            {
+                try
+                {
+                    Shape shape = null;
+                    if (segment.IsSvg)
+                    {
+                        shape = InsertSvgBlock(segment.Content, left, currentTop, width);
+                    }
+                    else if (segment.IsCodeBlock)
+                    {
+                        shape = InsertCodeBlock(
+                            segment.Content,
+                            segment.Language,
+                            left,
+                            currentTop,
+                            width
+                        );
+                    }
+                    else if (segment.IsTable)
+                    {
+                        shape = InsertTable(segment.Content, left, currentTop, width);
+                    }
+                    else if (segment.IsMathBlock)
+                    {
+                        shape = InsertMathBlock(segment.Content, left, currentTop, width);
+                    }
+                    else if (segment.IsBlockQuote)
+                    {
+                        shape = InsertBlockQuote(segment.Content, left, currentTop, width);
+                    }
+                    else
+                    {
+                        string html = ProcessMarkdown(segment.Content, width);
+                        if (!string.IsNullOrEmpty(html))
+                        {
+                            // Add retry mechanism for clipboard operations
+                            int retryCount = 3;
+                            while (retryCount > 0)
+                            {
+                                try
+                                {
+                                    CopyHtmlToClipBoard(segment.Content, html);
+                                    System.Threading.Thread.Sleep(100); // Add 100ms delay
+                                    ShapeRange textContent = slide.Shapes.Paste();
+
+                                    if (textContent != null && textContent.Count > 0)
+                                    {
+                                        Shape textShape = textContent[1];
+                                        textShape.Width = width;
+                                        textShape.Left = left;
+                                        textShape.Top = currentTop;
+                                        shape = textShape;
+
+                                        // Process inline math formulas
+                                        ProcessInlineMathFormulas(textShape);
+
+                                        if (textShape.TextFrame.HasText == Office.MsoTriState.msoTrue)
+                                        {
+                                            TextRange textRange = textShape.TextFrame.TextRange;
+                                            foreach (TextRange paragraph in textRange.Paragraphs(-1))
+                                            {
+                                                if (paragraph.ParagraphFormat.Bullet.Type != PpBulletType.ppBulletNone)
+                                                {
+                                                    // 保存列表样式
+                                                    PpBulletType ppBulletType = paragraph.ParagraphFormat.Bullet.Type;
+                                                    int character = paragraph.ParagraphFormat.Bullet.Character;
+                                                    int startValue = paragraph.ParagraphFormat.Bullet.StartValue; // 有序列表的编号
+                                                    PpNumberedBulletStyle stype = paragraph.ParagraphFormat.Bullet.Style; // 有序列表的样式
+
+                                                    paragraph.ParagraphFormat.Bullet.Type = ppBulletType;
+                                                    paragraph.ParagraphFormat.Bullet.Character = character;
+                                                    if (ppBulletType == PpBulletType.ppBulletNumbered)
+                                                    {
+                                                        paragraph.ParagraphFormat.Bullet.StartValue = startValue;
+                                                        paragraph.ParagraphFormat.Bullet.Style = stype;
+                                                    }
+                                                    // 列表样式不受后面字体样式的干扰
+                                                    paragraph.ParagraphFormat.Bullet.UseTextFont = Office.MsoTriState.msoFalse;
+                                                    paragraph.ParagraphFormat.Bullet.UseTextColor = Office.MsoTriState.msoFalse;
+                                                    paragraph.ParagraphFormat.Bullet.Font.Bold = Office.MsoTriState.msoFalse;
+                                                    paragraph.ParagraphFormat.Bullet.Font.Italic = Office.MsoTriState.msoFalse;
+
+                                                    string text = paragraph.Text.Trim();
+                                                    if (text.StartsWith("- [x]"))
+                                                    {
+                                                        char myCharacter = (char)9745; // ☑
+                                                        paragraph.ParagraphFormat.Bullet.Character = myCharacter;
+                                                        paragraph.Text = text.Substring(5).Trim(); // Remove "- [x]"
+                                                    }
+                                                    else if (text.StartsWith("- [ ]"))
+                                                    {
+                                                        char myCharacter = (char)9744; // ☐
+                                                        paragraph.ParagraphFormat.Bullet.Character = myCharacter;
+                                                        paragraph.Text = text.Substring(5).Trim(); // Remove "- [ ]"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        break; // Success, exit retry loop
+                                    }
+                                }
+                                catch (System.Runtime.InteropServices.COMException)
+                                {
+                                    retryCount--;
+                                    if (retryCount <= 0)
+                                    {
+                                        MessageBox.Show(
+                                            $"无法粘贴内容: {segment.Content.Substring(0, Math.Min(30, segment.Content.Length))}..."
+                                        );
+                                    }
+                                    System.Threading.Thread.Sleep(200); // Wait longer before retry
+                                }
+                            }
+                        }
+                    }
+
+                    if (shape != null)
+                    {
+                        insertedShapes.Add(shape);
+                        currentTop += shape.Height + 10;
+                    }
+                    else
+                    {
+                        hadErrors = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    hadErrors = true;
+                    MessageBox.Show($"处理段落时出错: {ex.Message}");
+                    continue; // Continue with next segment
+                }
+            }
+
+            return insertedShapes;
+        }
+
+
+        private void ProcessInlineMathFormulas(Shape textShape)
+        {
+            TextRange textRange = textShape.TextFrame.TextRange;
+            string text = textRange.Text;
+            // Regex pattern to find math expressions between $ signs
+            var matches = Regex.Matches(text, @"\$([^$\n]+?)\$");
+            // matches.Count如果=0，说明没有匹配到，直接返回
+            if (matches.Count == 0)
+            {
+                return;
+            }
+            // 创建tempShape，如果不创建，行内数学公式包括分式就不会正常转化
+            Shape tempShape = InsertMathBlock("a", 0, 0);
+            // 删除mathShape
+            tempShape.Delete();
+
+            // Process matches in reverse order to maintain correct indices
+            for (int i = matches.Count - 1; i >= 0; i--)
+            {
+                var match = matches[i];
+                int start = match.Index + 1; // 1-based start index of the match (e.g., the first '$')
+                int length = match.Length; // Length of the matched string (e.g., "$formula$")
+                string formula = match.Groups[1].Value; // Content within $...$ (e.g., "formula")
+
+                // Check if we need to insert a space AFTER the formula (after the second '$')
+                int endIdxInText = match.Index + match.Length; // index in string right after $formula$
+                bool needSpaceAfter = false;
+                if (endIdxInText < text.Length)
+                {
+                    char nextChar = text[endIdxInText];
+                    if (!char.IsWhiteSpace(nextChar))
+                    {
+                        needSpaceAfter = true;
+                    }
+                }
+
+                // Check if we need to insert a space BEFORE the formula (before the first '$')
+                int startIdxInText = match.Index; // index of the first '$' in string
+                bool needSpaceBefore = false;
+                if (startIdxInText > 0)
+                {
+                    char prevChar = text[startIdxInText - 1];
+                    if (!char.IsWhiteSpace(prevChar))
+                    {
+                        needSpaceBefore = true;
+                    }
+                }
+
+                if (needSpaceAfter)
+                {
+                    textRange.Characters(start + length, 0).InsertBefore(" ");
+                    textRange = textShape.TextFrame.TextRange; // Refresh textRange to keep in sync
+                }
+
+                int formulaStart = start;
+                if (needSpaceBefore)
+                {
+                    textRange.Characters(start, 0).InsertBefore(" ");
+                    textRange = textShape.TextFrame.TextRange; // Refresh textRange to keep in sync
+                    formulaStart = start + 1;
+                }
+
+                // Select the range "$formula$"
+                TextRange selectedRange = textRange.Characters(formulaStart, length);
+                // Replace its text with "formula"
+                selectedRange.Text = formula;
+                textRange = textShape.TextFrame.TextRange; // Refresh textRange after replacement
+
+                // Select and convert the formula range precisely
+                TextRange newSelectedRange = textRange.Characters(formulaStart, formula.Length);
+                newSelectedRange.Select();
+                app.CommandBars.ExecuteMso("EquationInsertNew");
+
+                app.CommandBars.ExecuteMso("EquationProfessional");
+                textRange = textShape.TextFrame.TextRange; // Refresh textRange after converting to equation
+            }
+        }
+
+        private Shape InsertCodeBlock(string code, string language, float left, float top, float width = 500)
+        {
+            Slide slide = app.ActiveWindow.View.Slide;
+            Shape textBox = slide.Shapes.AddTextbox(
+                Office.MsoTextOrientation.msoTextOrientationHorizontal,
+                left,
+                top,
+                width,
+                300
+            );
+
+            // Set code block style
+            textBox.Fill.Solid();
+            textBox.Fill.ForeColor.RGB = toggleBackgroundCheckBox.Checked
+                ? ColorTranslator.ToOle(Color.FromArgb(30, 30, 30))
+                : ColorTranslator.ToOle(Color.White);
+            textBox.Line.ForeColor.RGB = ColorTranslator.ToOle(Color.FromArgb(200, 200, 200));
+            textBox.Line.Weight = 1;
+
+            textBox.TextFrame.TextRange.Text = code;
+
+            // Apply base formatting
+            textBox.TextFrame.TextRange.Font.Name = "Consolas";
+            textBox.TextFrame.TextRange.Font.Size = 12;
+            textBox.TextFrame.TextRange.Font.Color.RGB = toggleBackgroundCheckBox.Checked
+                ? ColorTranslator.ToOle(Color.White)
+                : ColorTranslator.ToOle(Color.Black);
+            textBox.TextFrame.TextRange.ParagraphFormat.Alignment =
+                PpParagraphAlignment.ppAlignLeft;
+
+            // Set margins
+            textBox.TextFrame.MarginLeft = 10;
+            textBox.TextFrame.MarginRight = 10;
+            textBox.TextFrame.MarginTop = 5;
+            textBox.TextFrame.MarginBottom = 5;
+
+            // Apply syntax highlighting
+            var highlighter = new CodeHighlighter(toggleBackgroundCheckBox.Checked);
+            highlighter.ApplyHighlighting(textBox, code, language);
+
+            // Auto-size the textbox to fit content
+            textBox.TextFrame.AutoSize = PpAutoSize.ppAutoSizeShapeToFitText;
+
+            return textBox;
+        }
+
+        public class ImageGroup
+        {
+            public List<Shape> Shapes { get; set; } = new List<Shape>();
+            public float MinTop { get; set; }
+            public float MaxBottom { get; set; }
+
+            public bool OverlapsWith(Shape shape)
+            {
+                float shapeHeight = shape.Height;
+                float threshold = shapeHeight * 0.5f; // 50% of shape height
+                float shapeBottom = shape.Top + shapeHeight;
+
+                // Calculate overlap height
+                float overlapStart = Math.Max(MinTop, shape.Top);
+                float overlapEnd = Math.Min(MaxBottom, shapeBottom);
+                float overlapHeight = overlapEnd - overlapStart;
+
+                return overlapHeight >= threshold;
+            }
+
+            public void AddShape(Shape shape)
+            {
+                if (Shapes.Count == 0)
+                {
+                    MinTop = shape.Top;
+                    MaxBottom = shape.Top + shape.Height;
+                }
+                else
+                {
+                    MinTop = Math.Min(MinTop, shape.Top);
+                    MaxBottom = Math.Max(MaxBottom, shape.Top + shape.Height);
+                }
+                Shapes.Add(shape);
+            }
+        }
+
+        private class MarkdownSegment
+        {
+            public string Content { get; set; }
+            public bool IsCodeBlock { get; set; }
+            public bool IsTable { get; set; }
+            public bool IsMathBlock { get; set; }
+            public bool IsBlockQuote { get; set; } // Add this line
+            public bool IsSvg { get; set; }
+            public string Language { get; set; }
+        }
+
+        private List<MarkdownSegment> SplitMarkdownIntoSegments(string markdown)
+        {
+            var segments = new List<MarkdownSegment>();
+            var currentPosition = 0;
+
+            // Updated pattern to better handle tables
+            // 1. Tables must start with a header line
+            // 2. Followed by a separator line
+            // 3. Then one or more data lines
+            var pattern =
+                @"(?:```(\w*)\r?\n(.*?)\r?\n```)|"
+                + // Code blocks
+                @"(?:\|[^\n]*\|\r?\n\|[-|\s]*\|\r?\n(?:\|[^\n]*\|\r?\n)*\|[^\n]*\|?)|"
+                + // Tables
+                @"(\$\$[\s\S]*?\$\$)|"
+                + // Math blocks
+                @"(?:(?:^|\n)(?:>[^\n]*(?:\r?\n>[^\n]*)*))"; // 引述块（修改后的模式）
+
+            var regex = new Regex(pattern, RegexOptions.Multiline | RegexOptions.Singleline);
+
+            var matches = regex.Matches(markdown);
+
+            foreach (Match match in matches)
+            {
+                // Add text before special block if exists
+                if (match.Index > currentPosition)
+                {
+                    string textBefore = markdown.Substring(
+                        currentPosition,
+                        match.Index - currentPosition
+                    );
+                    if (!string.IsNullOrWhiteSpace(textBefore))
+                    {
+                        string trimmed = textBefore.Trim();
+                        bool isSvg = trimmed.StartsWith("<svg", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith("</svg>", StringComparison.OrdinalIgnoreCase);
+                        segments.Add(
+                            new MarkdownSegment
+                            {
+                                Content = trimmed,
+                                IsCodeBlock = false,
+                                IsTable = false,
+                                IsMathBlock = false,
+                                IsBlockQuote = false,
+                                IsSvg = isSvg
+                            }
+                        );
+                    }
+                }
+
+                string content = match.Value;
+
+                // Determine block type and add segment
+                if (content.StartsWith("```"))
+                {
+                    var lines = content.Split(
+                        new[] { '\r', '\n' },
+                        StringSplitOptions.RemoveEmptyEntries
+                    );
+                    var language = lines[0].Substring(3).Trim();
+                    var codeContent = string.Join("\n", lines.Skip(1).Take(lines.Length - 2));
+
+                    string trimmedCode = codeContent.Trim();
+                    bool isSvg = language.Equals("svg", StringComparison.OrdinalIgnoreCase)
+                        || (trimmedCode.StartsWith("<svg", StringComparison.OrdinalIgnoreCase) && trimmedCode.EndsWith("</svg>", StringComparison.OrdinalIgnoreCase));
+                    segments.Add(
+                        new MarkdownSegment
+                        {
+                            Content = codeContent,
+                            Language = string.IsNullOrEmpty(language) ? "text" : language,
+                            IsCodeBlock = !isSvg,
+                            IsTable = false,
+                            IsMathBlock = false,
+                            IsBlockQuote = false,
+                            IsSvg = isSvg
+                        }
+                    );
+                }
+                else if (content.StartsWith("|"))
+                {
+                    // Clean up table content (remove trailing whitespace and newlines)
+                    content = string.Join(
+                        "\n",
+                        content
+                            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                            .Select(line => line.Trim())
+                            .Where(line => line.StartsWith("|") && line.EndsWith("|"))
+                    );
+
+                    segments.Add(
+                        new MarkdownSegment
+                        {
+                            Content = content,
+                            IsCodeBlock = false,
+                            IsTable = true,
+                            IsMathBlock = false,
+                            IsBlockQuote = false,
+                        }
+                    );
+                }
+                else if (content.StartsWith("$$"))
+                {
+                    content = string.Join(
+                        "\n",
+                        content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    );
+                    
+                    // Remove surrounding $$ markers like in insertEquationButton_Click
+                    string mathContent = content.Replace("\n", ""); // Remove line breaks
+                    if (mathContent.StartsWith("$$") && mathContent.EndsWith("$$"))
+                    {
+                        mathContent = mathContent.Substring(2, mathContent.Length - 4);
+                    }
+                    
+                    segments.Add(
+                        new MarkdownSegment
+                        {
+                            Content = mathContent,
+                            IsCodeBlock = false,
+                            IsTable = false,
+                            IsMathBlock = true,
+                            IsBlockQuote = false,
+                        }
+                    );
+                }
+                else if (content.TrimStart('\r', '\n').StartsWith(">"))
+                {
+                    // Clean up block quote content
+                    content = string.Join(
+                        "\n",
+                        content
+                            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                            .Select(line => line.TrimStart('>', ' '))
+                    );
+
+                    segments.Add(
+                        new MarkdownSegment
+                        {
+                            Content = content,
+                            IsCodeBlock = false,
+                            IsTable = false,
+                            IsMathBlock = false,
+                            IsBlockQuote = true,
+                        }
+                    );
+                }
+
+                currentPosition = match.Index + match.Length;
+            }
+
+            // Add remaining text if exists
+            if (currentPosition < markdown.Length)
+            {
+                string remainingText = markdown.Substring(currentPosition);
+                if (!string.IsNullOrWhiteSpace(remainingText))
+                {
+                    string trimmed = remainingText.Trim();
+                    bool isSvg = trimmed.StartsWith("<svg", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith("</svg>", StringComparison.OrdinalIgnoreCase);
+                    segments.Add(
+                        new MarkdownSegment
+                        {
+                            Content = trimmed,
+                            IsCodeBlock = false,
+                            IsTable = false,
+                            IsMathBlock = false,
+                            IsBlockQuote = false,
+                            IsSvg = isSvg
+                        }
+                    );
+                }
+            }
+
+            return segments;
+        }
+
+        private Shape InsertSvgBlock(string svgContent, float left, float top, float width = 500)
+        {
+            Slide slide = app.ActiveWindow.View.Slide;
+            string tempFilePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ".svg");
+            try
+            {
+                File.WriteAllText(tempFilePath, svgContent, Encoding.UTF8);
+                Shape shape = slide.Shapes.AddPicture(
+                    tempFilePath,
+                    Office.MsoTriState.msoFalse,
+                    Office.MsoTriState.msoTrue,
+                    left,
+                    top,
+                    -1,
+                    -1
+                );
+
+                if (shape.Width > width)
+                {
+                    float ratio = shape.Height / shape.Width;
+                    shape.Width = width;
+                    shape.Height = width * ratio;
+                }
+
+                return shape;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"插入SVG图片时出错: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                if (File.Exists(tempFilePath))
+                {
+                    try
+                    {
+                        File.Delete(tempFilePath);
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        private Shape InsertTable(string tableContent, float left, float top, float width = 500)
+        {
+            Slide slide = app.ActiveWindow.View.Slide;
+            Shape textBox = slide.Shapes.AddTextbox(
+                Office.MsoTextOrientation.msoTextOrientationHorizontal,
+                left,
+                top,
+                width,
+                300
+            );
+
+            // Convert markdown table to HTML
+            // Configure the pipeline with all advanced extensions active
+            var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+            string html = Markdown.ToHtml(tableContent, pipeline);
+            html = html.Replace(
+                "<table>",
+                $"<table style='width:{width}px; border-collapse:collapse;border:1pt solid black;'>"
+            );
+            html = html.Replace("<td>", "<td style='border:1pt solid black;'>");
+            html = html.Replace("<th>", "<th style='border:1pt solid black;'>");
+
+            // Create a temporary DataObject for the table content
+
+            CopyHtmlToClipBoard(tableContent, html);
+            System.Threading.Thread.Sleep(100);
+
+            ShapeRange tableShape = slide.Shapes.Paste();
+            if (tableShape != null && tableShape.Count > 0)
+            {
+                tableShape[1].Left = left;
+                tableShape[1].Top = top;
+                textBox.Delete();
+                return tableShape[1];
+            }
+
+            try
+            {
+                textBox.Delete();
+            }
+            catch { }
+            return null;
+        }
+
+        private Shape InsertMathBlock(string mathContent, float left, float top, float width = 500)
+        {
+            Slide slide = app.ActiveWindow.View.Slide;
+
+            // Insert a new textbox
+            Shape textBox = slide.Shapes.AddTextbox(
+                Office.MsoTextOrientation.msoTextOrientationHorizontal,
+                left,
+                top,
+                width,
+                500
+            );
+
+            // Select the newly inserted textbox
+            textBox.Select();
+            app.ActiveWindow.Selection.TextRange.Select();
+
+            // Run SwitchLatex
+            app.CommandBars.ExecuteMso("EquationInsertNew");
+            Shape equationShape = app.ActiveWindow.Selection.ShapeRange[1];
+            equationShape
+                .TextFrame.TextRange.Characters(
+                    1,
+                    equationShape.TextFrame.TextRange.Text.Length - 1
+                )
+                .Text = "\u24C9";
+
+            app.CommandBars.ExecuteMso("EquationInsertNew");
+            app.ActiveWindow.Selection.TextRange.Select();
+            Shape equationShape2 = app.ActiveWindow.Selection.ShapeRange[1];
+            // Set the LaTeX input to the equation shape
+            equationShape2
+                .TextFrame.TextRange.Characters(
+                    1,
+                    equationShape2.TextFrame.TextRange.Text.Length - 1
+                )
+                .Text = mathContent;
+
+            // Convert to professional format
+            app.CommandBars.ExecuteMso("EquationProfessional");
+            // Auto-size and position
+            equationShape.TextFrame.AutoSize = PpAutoSize.ppAutoSizeShapeToFitText;
+            equationShape.Left = left;
+            equationShape.Top = top;
+
+            return equationShape;
+        }
+
+        private Shape InsertBlockQuote(string content, float left, float top, float width = 500)
+        {
+            Slide slide = app.ActiveWindow.View.Slide;
+            Shape textBox = slide.Shapes.AddTextbox(
+                Office.MsoTextOrientation.msoTextOrientationHorizontal,
+                left,
+                top,
+                width,
+                300
+            );
+
+            // Configure Markdown pipeline
+            var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+
+            // Convert to HTML and remove blockquote tags
+            string html = Markdown
+                .ToHtml(content, pipeline)
+                .Replace("<blockquote>", "")
+                .Replace("</blockquote>", "");
+
+            // Add custom styling
+            html = $"<div style='font-family: 微软雅黑; padding: 10px;'>{html}</div>";
+
+            // Copy to clipboard and paste
+            CopyHtmlToClipBoard(content, html);
+            System.Threading.Thread.Sleep(100);
+
+            ShapeRange quoteShape = slide.Shapes.Paste();
+            if (quoteShape != null && quoteShape.Count > 0)
+            {
+                Shape shape = quoteShape[1];
+                shape.Left = left;
+                shape.Top = top;
+
+                // Add black border
+                shape.Line.Visible = Office.MsoTriState.msoTrue;
+                shape.Line.ForeColor.RGB = ColorTranslator.ToOle(Color.Black);
+                shape.Line.Weight = 1;
+
+                textBox.Delete();
+                return shape;
+            }
+
+            try
+            {
+                textBox.Delete();
+            }
+            catch { }
+            return null;
+        }
+
+        private string ProcessMarkdown(string markdown, float width = 500)
+        {
+            var codeBlockRegex = new Regex(@"```.*?\r?\n(.*?)\r?\n```", RegexOptions.Singleline);
+
+            markdown = codeBlockRegex.Replace(markdown, string.Empty);
+
+            // Pre-process inline math formulas to add spaces before and after if they are not already present.
+            // This ensures Markdig's Mathematics extension flanking rules are satisfied so they are parsed as math spans.
+            markdown = Regex.Replace(markdown, @"(?<!\$)\$([^$\n]+?)\$(?!\$)", m =>
+            {
+                string formula = m.Value;
+                int index = m.Index;
+
+                bool needSpaceBefore = false;
+                if (index > 0)
+                {
+                    char prevChar = markdown[index - 1];
+                    if (!char.IsWhiteSpace(prevChar))
+                    {
+                        needSpaceBefore = true;
+                    }
+                }
+
+                bool needSpaceAfter = false;
+                int endIdx = index + m.Length;
+                if (endIdx < markdown.Length)
+                {
+                    char nextChar = markdown[endIdx];
+                    if (!char.IsWhiteSpace(nextChar))
+                    {
+                        needSpaceAfter = true;
+                    }
+                }
+
+                string result = formula;
+                if (needSpaceBefore)
+                {
+                    result = " " + result;
+                }
+                if (needSpaceAfter)
+                {
+                    result = result + " ";
+                }
+                return result;
+            });
+
+            // Pre-process bold delimiters to bypass CommonMark punctuation flanking restrictions in Chinese/full-width brackets context
+            markdown = Regex.Replace(markdown, @"\*\*((?:(?!\*\*).)+?)\*\*", "<strong>$1</strong>", RegexOptions.Singleline);
+            markdown = Regex.Replace(markdown, @"__((?:(?!__).)+?)__", "<strong>$1</strong>", RegexOptions.Singleline);
+
+            // Convert remaining markdown to HTML
+            var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+            string html = Markdown.ToHtml(markdown, pipeline);
+
+            // Add checkbox markers after the checkboxes
+            html = html.Replace(
+                "<input disabled=\"disabled\" type=\"checkbox\" checked=\"checked\" />",
+                "- [x]"
+            );
+            html = html.Replace("<input disabled=\"disabled\" type=\"checkbox\" />", "- [ ]");
+            // Add table styling
+            html = html.Replace(
+                "<table>",
+                $"<table style='width:{width}px; border-collapse:collapse;border:1pt solid黑色;'>"
+            );
+            html = html.Replace("<td>", "<td style='border:1pt solid black;'>");
+            html = html.Replace("<th>", "<th style='border:1pt solid black;'>");
+
+            html = html.Replace("<li>", "<li style='margin-left: 10px;'>");
+            html = html.Replace("<code>", "<span style='color: #C00000; font-family: Consolas;'>");
+            html = html.Replace("</code>", "</span>");
+
+            html = $"<div style='font-family: 微软雅黑;'>{html}</div>";
+
+            // 把<span class="math">\(...\)</span>转换$...$
+            html = Regex.Replace(
+                html,
+                @"<span class=""math"">\\\((.+?)\\\)</span>",
+                m => $"${m.Groups[1].Value}$"
+            );
+            // 弹窗显示
+            //MessageBox.Show($"Markdown转换: {html}");
+            return html;
+        }
+
+        public void CopyHtmlToClipBoard(string markdown, string html)
+        {
+            try
+            {
+                var utf = Encoding.UTF8;
+                var format =
+                    "Version:0.9\r\nStartHTML:{0:000000}\r\nEndHTML:{1:000000}\r\nStartFragment:{2:000000}\r\nEndFragment:{3:000000}\r\n";
+                var text =
+                    "<html>\r\n<head>\r\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset="
+                    + utf.WebName
+                    + "\">\r\n<title>HTML clipboard</title>\r\n</head>\r\n<body>\r\n<!--StartFragment-->";
+                var text2 = "<!--EndFragment-->\r\n</body>\r\n</html>\r\n";
+                var s = string.Format(format, 0, 0, 0, 0);
+                var byteCount = utf.GetByteCount(s);
+                var byteCount2 = utf.GetByteCount(text);
+                var byteCount3 = utf.GetByteCount(html);
+                var byteCount4 = utf.GetByteCount(text2);
+                var s2 =
+                    string.Format(
+                        format,
+                        byteCount,
+                        byteCount + byteCount2 + byteCount3 + byteCount4,
+                        byteCount + byteCount2,
+                        byteCount + byteCount2 + byteCount3
+                    )
+                    + text
+                    + html
+                    + text2;
+
+                var dataObject = new DataObject();
+                dataObject.SetData(DataFormats.Html, new MemoryStream(utf.GetBytes(s2)));
+                dataObject.SetData(DataFormats.UnicodeText, markdown);
+
+                int retryCount = 3;
+                while (retryCount > 0)
+                {
+                    try
+                    {
+                        Clipboard.SetDataObject(dataObject, true, 3, 100); // Add retry and timeout parameters
+                        break;
+                    }
+                    catch (Exception)
+                    {
+                        retryCount--;
+                        if (retryCount <= 0)
+                            throw;
+                        System.Threading.Thread.Sleep(100);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"复制到剪贴板时出错: {ex.Message}");
+                throw;
+            }
+        }
+
+        private void copyCrop_Click(object sender, RibbonControlEventArgs e)
+        {
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                Shape shape = sel.ShapeRange[1];
+                if (!IsPictureShape(shape))
+                {
+                    MessageBox.Show("请选择一个图片对象。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // 保存裁剪设置
+                cropLeft = shape.PictureFormat.CropLeft;
+                cropRight = shape.PictureFormat.CropRight;
+                cropTop = shape.PictureFormat.CropTop;
+                cropBottom = shape.PictureFormat.CropBottom;
+
+                // 保存原始高度
+                currentCropedHeight = shape.Height;
+                float croppedPixels = cropTop + cropBottom;
+                originalHeight = currentCropedHeight + croppedPixels;
+
+                hasCopiedCrop = true;
+                //MessageBox.Show("已复制图片裁剪设置");
+            }
+            else
+            {
+                MessageBox.Show("请选择一个图片对象");
+            }
+        }
+
+        private void pasteCrop_Click(object sender, RibbonControlEventArgs e)
+        {
+            if (!hasCopiedCrop)
+            {
+                MessageBox.Show("请先复制图片裁剪设置");
+                return;
+            }
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                int appliedCount = 0;
+                foreach (Shape shape in sel.ShapeRange)
+                {
+                    try
+                    {
+                        if (!IsPictureShape(shape))
+                        {
+                            continue;
+                        }
+
+                        // Store original position
+                        float originalLeft = shape.Left;
+                        float originalTop = shape.Top;
+
+                        // Clear existing crop settings
+                        shape.PictureFormat.CropLeft = 0;
+                        shape.PictureFormat.CropRight = 0;
+                        shape.PictureFormat.CropTop = 0;
+                        shape.PictureFormat.CropBottom = 0;
+
+                        // Restore to original height
+                        shape.Height = originalHeight;
+
+                        // Apply crop settings
+                        shape.PictureFormat.CropLeft = cropLeft;
+                        shape.PictureFormat.CropRight = cropRight;
+                        shape.PictureFormat.CropTop = cropTop;
+                        shape.PictureFormat.CropBottom = cropBottom;
+
+                        shape.Height = currentCropedHeight;
+
+                        // Restore original position
+                        shape.Left = originalLeft;
+                        shape.Top = originalTop;
+                        appliedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"应用裁剪设置时出错: {ex.Message}");
+                    }
+                }
+
+                if (appliedCount == 0)
+                {
+                    MessageBox.Show("当前选择中没有可应用裁剪设置的图片。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            else
+            {
+                MessageBox.Show("请选择要应用裁剪设置的图片");
+            }
+        }
+
+        private void openGithub_Click(object sender, RibbonControlEventArgs e)
+        {
+            System.Diagnostics.Process.Start("https://github.com/CaptainMusX/SlideSCI-Focus/");
+        }
+
+        private void openDoc_Click(object sender, RibbonControlEventArgs e)
+        {
+            System.Diagnostics.Process.Start(
+                "https://github.com/CaptainMusX/SlideSCI-Focus#readme"
+            );
+        }
+
+        private void current_Version(object sender, RibbonControlEventArgs e)
+        {
+            System.Reflection.Assembly assembly = System.Reflection.Assembly.GetExecutingAssembly();
+            Version version = assembly.GetName().Version;
+            MessageBox.Show($"Version {version}", "Current Version");
+        }
+
+        private void aboutDeveloper_Click(object sender, RibbonControlEventArgs e)
+        {
+            MessageBox.Show(
+                "开发者: CaptainMusX\n项目: SlideSCI Focus\n基于 Achuan-2/SlideSCI 修改（AGPL-3.0）\nGithub地址：https://github.com/CaptainMusX/SlideSCI-Focus",
+                "关于 SlideSCI Focus"
+            );
+        }
+
+        private void positionSortCheckBox_Click(object sender, RibbonControlEventArgs e) { }
+
+        private void addLabelsButton_Click(object sender, RibbonControlEventArgs e)
+        {
+            string fontFamily = labelFontNameEditBox.Text; // 修改为使用新控件
+            float fontSize;
+            if (!float.TryParse(labelFontSizeEditBox.Text, out fontSize)) // 修改为使用新控件
+            {
+                MessageBox.Show("请输入有效的字体大小。");
+                return;
+            }
+            float labelOffsetX;
+            if (!float.TryParse(labelOffsetXEditBox.Text, out labelOffsetX))
+            {
+                MessageBox.Show("请输入有效的X偏移量。");
+                return;
+            }
+            float labelOffsetY;
+            if (!float.TryParse(labelOffsetYEditBox.Text, out labelOffsetY))
+            {
+                MessageBox.Show("请输入有效的Y偏移量。");
+                return;
+            }
+            string labelTemplate = labelTemplateComboBox.Text;
+
+            // 获取起始编号
+            int startIndex = 1;
+            if (!string.IsNullOrEmpty(labelIndex.Text) && !int.TryParse(labelIndex.Text, out startIndex))
+            {
+                MessageBox.Show("请输入有效的起始编号。");
+                return;
+            }
+
+            AddLabelsToImages(fontFamily, fontSize, labelOffsetX, labelOffsetY, labelTemplate, startIndex, true);
+        }
+
+        /// <summary>
+        /// 图片添加标签
+        /// </summary>
+        /// <param name="fontFamily"></param>
+        /// <param name="fontSize"></param>
+        /// <param name="labelOffsetX"></param>
+        /// <param name="labelOffsetY"></param>
+        /// <param name="labelTemplate">标签格式</param>
+        /// <param name="startIndex">起始编号</param>
+        /// <param name="isAddLabels">是否为添加标签模式，true为添加，false为更新</param>
+        private void AddLabelsToImages(
+            string fontFamily,
+            float fontSize,
+            float labelOffsetX,
+            float labelOffsetY,
+            string labelTemplate,
+            int startIndex = 1,
+            bool isAddLabels = true
+        )
+        {
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type != PpSelectionType.ppSelectionShapes)
+            {
+                // 需要弹窗显示sel.Type
+                MessageBox.Show($"请选择要添加标签的图片。当前选择类型: {sel.Type}");
+                // MessageBox.Show("请选择要添加标签的图片。");
+                return;
+            }
+
+            var templates = new Dictionary<string, string>
+            {
+                { "A", "ABCDEFGHIJKLMNOPQRSTUVWXYZ" },
+                { "a", "abcdefghijklmnopqrstuvwxyz" },
+                { "A)", "ABCDEFGHIJKLMNOPQRSTUVWXYZ" },
+                { "a)", "abcdefghijklmnopqrstuvwxyz" },
+                { "(A)", "ABCDEFGHIJKLMNOPQRSTUVWXYZ" },
+                { "(a)", "abcdefghijklmnopqrstuvwxyz" },
+                { "1", "123456789" }, // Added numeric template
+                { "1)", "123456789" }, // Added numeric template with parenthesis
+                { "Ⅰ", "ⅠⅡⅢⅣⅤⅥⅦⅦⅨⅩ" },
+                { "Ⅰ)", "ⅠⅡⅢⅣⅤⅥⅦⅦⅨⅩ" },
+                { "①", "①②③④⑤⑥⑦⑧⑨⑩" },
+                { "①)", "①②③④⑤⑥⑦⑧⑨⑩" },
+                { "一", "一二三四五六七八九十" },
+                { "一)", "一二三四五六七八九十" },
+            };
+
+            if (!templates.ContainsKey(labelTemplate))
+            {
+                labelTemplate = "A";
+            }
+
+            string labels = templates[labelTemplate];
+            bool isNumeric = labelTemplate.StartsWith("1");
+            int selectionCount = sel.ShapeRange.Count;
+
+            // Create groups based on vertical position
+            var groups = new List<ImageGroup>();
+            var selectedImgShapes = new List<Shape>();
+            foreach (Shape shape in sel.ShapeRange)
+            {
+                // // Skip text boxes if excludeTextcheckBox is checked
+                // if (
+                //     shape.Type == Office.MsoShapeType.msoTextBox
+                //     || shape.Type == Office.MsoShapeType.msoAutoShape
+                // )
+                // {
+                //     continue;
+                // }
+                selectedImgShapes.Add(shape);
+            }
+            if (selectedImgShapes.Count == 0)
+            {
+                MessageBox.Show("请选择要添加标签的图片。");
+                return;
+            }
+
+            // Group shapes based on vertical overlap
+            foreach (var shape in selectedImgShapes)
+            {
+                bool addedToExistingGroup = false;
+                foreach (var group in groups)
+                {
+                    if (group.OverlapsWith(shape))
+                    {
+                        group.AddShape(shape);
+                        addedToExistingGroup = true;
+                        break;
+                    }
+                }
+
+                if (!addedToExistingGroup)
+                {
+                    var newGroup = new ImageGroup();
+                    newGroup.AddShape(shape);
+                    groups.Add(newGroup);
+                }
+            }
+
+            // Sort shapes within each group by x position
+            foreach (var group in groups)
+            {
+                group.Shapes.Sort((a, b) => a.Left.CompareTo(b.Left));
+            }
+
+            // Sort groups by MinTop
+            groups.Sort((a, b) => a.MinTop.CompareTo(b.MinTop));
+
+            // Create flattened list of sorted shapes
+            var sortedShapes = new List<Shape>();
+            foreach (var group in groups)
+            {
+                sortedShapes.AddRange(group.Shapes);
+            }
+
+            // Add labels to sorted shapes
+            for (int i = 0; i < sortedShapes.Count; i++)
+            {
+                try
+                {
+                    var item = sortedShapes[i];
+                    string label;
+                    if (isNumeric)
+                    {
+                        label = (startIndex + i).ToString();
+                    }
+                    else
+                    {
+                        int labelIndex = (startIndex - 1 + i) % labels.Length;
+                        label = labels[labelIndex].ToString();
+                    }
+
+                    if (labelTemplate.EndsWith(")") && !labelTemplate.StartsWith("("))
+                    {
+                        label += ")";
+                    }
+                    else if (labelTemplate.StartsWith("(") && labelTemplate.EndsWith(")"))
+                    {
+                        label = "(" + label + ")";
+                    }
+
+                    var textBox = app.ActiveWindow.View.Slide.Shapes.AddTextbox(
+                        Office.MsoTextOrientation.msoTextOrientationHorizontal,
+                        item.Left + labelOffsetX,
+                        item.Top + labelOffsetY,
+                        0, // Initial width
+                        fontSize * 2
+                    );
+
+                    // Set the text and font properties
+                    textBox.TextFrame.TextRange.Text = label;
+                    textBox.TextFrame.TextRange.Font.Size = fontSize;
+                    textBox.TextFrame.TextRange.Font.NameFarEast = fontFamily;
+                    textBox.TextFrame.TextRange.Font.Name = fontFamily;
+                    textBox.TextFrame.TextRange.ParagraphFormat.Alignment =
+                        PpParagraphAlignment.ppAlignLeft;
+
+                    // Auto-size the textbox to fit the text
+                    textBox.TextFrame.AutoSize = PpAutoSize.ppAutoSizeShapeToFitText;
+                    // 不自动换行
+                    textBox.TextFrame.WordWrap = Office.MsoTriState.msoFalse;
+
+                    // 自动加粗
+                    if (labelBoldcheckBox.Checked)
+                    {
+                        textBox.TextFrame.TextRange.Font.Bold = Office.MsoTriState.msoTrue;
+                    }
+                    // 自动选择
+                    if (i == 0)
+                    {
+                        textBox.Select(Office.MsoTriState.msoTrue);
+                    }
+                    else
+                    {
+                        textBox.Select(Office.MsoTriState.msoFalse);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"添加标签时出错: {ex.Message}");
+                }
+            }
+            
+            // 如果开启了编号自动更新，并且是添加标签模式，则更新起始编号
+            if (isAddLabels && labelIndexUpdatecheckBox.Checked)
+            {
+                int nextIndex = startIndex + sortedShapes.Count;
+                labelIndex.Text = nextIndex.ToString();
+            }
+        }
+
+        private class CopiedFontSettings
+        {
+            public string Name;
+            public string NameFarEast;
+            public string NameAscii;
+            public float Size;
+            public int ColorRGB;
+            public float Transparency;
+            public Office.MsoTriState Bold;
+            public Office.MsoTriState Italic;
+            public Office.MsoTriState Underline;
+            public Office.MsoTriState Shadow;
+            public bool HasValue = false;
+
+            // 文字效果
+            public Office.MsoTriState Emboss;
+            public float BaselineOffset;
+            public Office.MsoTriState Subscript;
+            public Office.MsoTriState Superscript;
+
+            // Glow 效果
+            public bool HasGlow;
+            public int GlowColorRGB;
+            public float GlowRadius;
+            public float GlowTransparency;
+
+            // Reflection 效果
+            public int ReflectionType;
+
+            // 文字轮廓（文本描边）
+            public bool HasOutline;
+            public int OutlineColorRGB;
+            public float OutlineTransparency;
+            public float OutlineWeight;
+            public int OutlineDashStyle; // Office.MsoLineDashStyle int value
+
+            // 文本突出显示高亮
+            public bool HasHighlight;
+            public int HighlightRGB;
+        }
+
+        private static CopiedFontSettings _copiedFontSettings = new CopiedFontSettings();
+
+        private class CopiedShapeSettings
+        {
+            public bool HasValue = false;
+            public int FillForeColorRGB;
+            public float FillTransparency;
+            public int FillBackColorRGB;
+            public int LineColorRGB;
+            public float LineTransparency;
+            public float LineWeight;
+            public Office.MsoLineStyle LineStyle;
+            public Office.MsoLineDashStyle LineDashStyle;
+            public bool FillVisible;
+            public bool LineVisible;
+        }
+
+        private static CopiedShapeSettings _copiedShapeSettings = new CopiedShapeSettings();
+        private static bool _hasCopiedGroupFormat = false;
+
+        private string _currentShapeCopyOption = "All";
+        private string _currentTextCopyOption = "All";
+
+        private void CopyTextFormat(Selection sel, string option)
+        {
+            _currentTextCopyOption = option;
+            try
+            {
+                _copiedFontSettings = new CopiedFontSettings();
+                _copiedFontSettings.HasValue = true;
+
+                // 1. 先从经典的 Font 对象复制基础文字格式（非常稳定可靠，特别是加粗、斜体等状态）
+                try
+                {
+                    PowerPoint.Font font = sel.TextRange.Font;
+                    try { _copiedFontSettings.Name = font.Name; } catch { }
+                    try { _copiedFontSettings.NameFarEast = font.NameFarEast; } catch { }
+                    try { _copiedFontSettings.NameAscii = font.Name; } catch { }
+                    try { _copiedFontSettings.Size = font.Size; } catch { }
+                    try { _copiedFontSettings.ColorRGB = font.Color.RGB; } catch { }
+                    _copiedFontSettings.Transparency = 0f;
+                    try { _copiedFontSettings.Bold = font.Bold; } catch { }
+                    try { _copiedFontSettings.Italic = font.Italic; } catch { }
+                    try { _copiedFontSettings.Underline = font.Underline; } catch { }
+                    try { _copiedFontSettings.Shadow = font.Shadow; } catch { }
+                    try { _copiedFontSettings.Emboss = font.Emboss; } catch { }
+                    try { _copiedFontSettings.BaselineOffset = font.BaselineOffset; } catch { }
+                    try { _copiedFontSettings.Subscript = font.Subscript; } catch { }
+                    try { _copiedFontSettings.Superscript = font.Superscript; } catch { }
+                }
+                catch { }
+
+                // 2. 再尝试从 Font2 复制高级文字格式（如发光、倒影、描边、高亮等），并作为补充
+                try
+                {
+                    dynamic textRange2 = sel.TextRange2;
+                    dynamic font2 = textRange2.Font;
+
+                    try { if (!string.IsNullOrEmpty(font2.Name)) _copiedFontSettings.Name = font2.Name; } catch { }
+                    try { if (!string.IsNullOrEmpty(font2.NameFarEast)) _copiedFontSettings.NameFarEast = font2.NameFarEast; } catch { }
+                    try { if (!string.IsNullOrEmpty(font2.NameAscii)) _copiedFontSettings.NameAscii = font2.NameAscii; } catch { }
+                    try { if (font2.Size > 0) _copiedFontSettings.Size = font2.Size; } catch { }
+                    try { _copiedFontSettings.ColorRGB = font2.Fill.ForeColor.RGB; } catch { }
+                    try { _copiedFontSettings.Transparency = font2.Fill.Transparency; } catch { }
+                    try { _copiedFontSettings.Bold = font2.Bold; } catch { }
+                    try { _copiedFontSettings.Italic = font2.Italic; } catch { }
+                    try { _copiedFontSettings.Underline = font2.UnderlineStyle != 0 ? Office.MsoTriState.msoTrue : Office.MsoTriState.msoFalse; } catch { }
+
+                    try
+                    {
+                        dynamic glow = font2.Glow;
+                        _copiedFontSettings.GlowRadius = glow.Radius;
+                        _copiedFontSettings.GlowTransparency = glow.Transparency;
+                        _copiedFontSettings.GlowColorRGB = glow.Color.RGB;
+                        _copiedFontSettings.HasGlow = glow.Radius > 0;
+                    }
+                    catch { }
+
+                    try
+                    {
+                        dynamic refl = font2.Reflection;
+                        _copiedFontSettings.ReflectionType = (int)refl.Type;
+                    }
+                    catch { }
+
+                    try
+                    {
+                        dynamic fontLine = font2.Line;
+                        bool lineVisible = false;
+                        try
+                        {
+                            var visVal = fontLine.Visible;
+                            if (visVal is bool)
+                            {
+                                lineVisible = (bool)visVal;
+                            }
+                            else
+                            {
+                                int visInt = Convert.ToInt32(visVal);
+                                // msoTrue=-1, msoTriStateMixed=-2, msoCTrue=1 都代表有轮廓
+                                lineVisible = (visInt == -1 || visInt == -2 || visInt == 1);
+                            }
+                        }
+                        catch { }
+
+                        _copiedFontSettings.HasOutline = lineVisible;
+                        if (lineVisible)
+                        {
+                            try { _copiedFontSettings.OutlineColorRGB = (int)fontLine.ForeColor.RGB; } catch { }
+                            try { _copiedFontSettings.OutlineTransparency = (float)fontLine.Transparency; } catch { }
+                            try { _copiedFontSettings.OutlineWeight = (float)fontLine.Weight; } catch { }
+                            try { _copiedFontSettings.OutlineDashStyle = (int)fontLine.DashStyle; } catch { }
+                        }
+                    }
+                    catch { }
+
+                    // 复制突出显示高亮
+                    try
+                    {
+                        dynamic hl = font2.Highlight;
+                        int hlType = Convert.ToInt32(hl.Type);
+                        if (hlType != 0)
+                        {
+                            int rgb = (int)hl.RGB;
+                            // 如果高亮颜色为 0 (代表无高亮，或极其罕见的纯黑色高亮)，则不认为有高亮
+                            if (rgb != 0)
+                            {
+                                _copiedFontSettings.HighlightRGB = rgb;
+                                _copiedFontSettings.HasHighlight = true;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"复制文字格式时出错: {ex.Message}");
+            }
+        }
+
+        private void CopyShapeTextFormat(Shape shape)
+        {
+            try
+            {
+                _copiedFontSettings = new CopiedFontSettings();
+                _copiedFontSettings.HasValue = true;
+
+                // 1. 先从经典的 Font 对象复制基础文字格式（非常稳定可靠，特别是加粗、斜体等状态）
+                try
+                {
+                    PowerPoint.Font font = shape.TextFrame.TextRange.Font;
+                    try { _copiedFontSettings.Name = font.Name; } catch { }
+                    try { _copiedFontSettings.NameFarEast = font.NameFarEast; } catch { }
+                    try { _copiedFontSettings.NameAscii = font.Name; } catch { }
+                    try { _copiedFontSettings.Size = font.Size; } catch { }
+                    try { _copiedFontSettings.ColorRGB = font.Color.RGB; } catch { }
+                    _copiedFontSettings.Transparency = 0f;
+                    try { _copiedFontSettings.Bold = font.Bold; } catch { }
+                    try { _copiedFontSettings.Italic = font.Italic; } catch { }
+                    try { _copiedFontSettings.Underline = font.Underline; } catch { }
+                    try { _copiedFontSettings.Shadow = font.Shadow; } catch { }
+                    try { _copiedFontSettings.Emboss = font.Emboss; } catch { }
+                    try { _copiedFontSettings.BaselineOffset = font.BaselineOffset; } catch { }
+                    try { _copiedFontSettings.Subscript = font.Subscript; } catch { }
+                    try { _copiedFontSettings.Superscript = font.Superscript; } catch { }
+                }
+                catch { }
+
+                // 2. 再尝试从 Font2 复制高级文字格式
+                try
+                {
+                    dynamic textRange2 = shape.TextFrame2.TextRange;
+                    dynamic font2 = textRange2.Font;
+
+                    try { if (!string.IsNullOrEmpty(font2.Name)) _copiedFontSettings.Name = font2.Name; } catch { }
+                    try { if (!string.IsNullOrEmpty(font2.NameFarEast)) _copiedFontSettings.NameFarEast = font2.NameFarEast; } catch { }
+                    try { if (!string.IsNullOrEmpty(font2.NameAscii)) _copiedFontSettings.NameAscii = font2.NameAscii; } catch { }
+                    try { if (font2.Size > 0) _copiedFontSettings.Size = font2.Size; } catch { }
+                    try { _copiedFontSettings.ColorRGB = font2.Fill.ForeColor.RGB; } catch { }
+                    try { _copiedFontSettings.Transparency = font2.Fill.Transparency; } catch { }
+                    try { _copiedFontSettings.Bold = font2.Bold; } catch { }
+                    try { _copiedFontSettings.Italic = font2.Italic; } catch { }
+                    try { _copiedFontSettings.Underline = font2.UnderlineStyle != 0 ? Office.MsoTriState.msoTrue : Office.MsoTriState.msoFalse; } catch { }
+                    try { _copiedFontSettings.Shadow = font2.Shadow; } catch { }
+                    try { _copiedFontSettings.Emboss = font2.Emboss; } catch { }
+                    try { _copiedFontSettings.BaselineOffset = font2.BaselineOffset; } catch { }
+                    try { _copiedFontSettings.Subscript = font2.Subscript; } catch { }
+                    try { _copiedFontSettings.Superscript = font2.Superscript; } catch { }
+
+                    try
+                    {
+                        dynamic glow = font2.Glow;
+                        _copiedFontSettings.GlowRadius = glow.Radius;
+                        _copiedFontSettings.GlowTransparency = glow.Transparency;
+                        _copiedFontSettings.GlowColorRGB = glow.Color.RGB;
+                        _copiedFontSettings.HasGlow = glow.Radius > 0;
+                    }
+                    catch { }
+
+                    try
+                    {
+                        dynamic refl = font2.Reflection;
+                        _copiedFontSettings.ReflectionType = (int)refl.Type;
+                    }
+                    catch { }
+
+                    try
+                    {
+                        dynamic fontLine = font2.Line;
+                        bool lineVisible = false;
+                        try
+                        {
+                            var visVal = fontLine.Visible;
+                            if (visVal is bool)
+                            {
+                                lineVisible = (bool)visVal;
+                            }
+                            else
+                            {
+                                int visInt = Convert.ToInt32(visVal);
+                                // msoTrue=-1, msoTriStateMixed=-2, msoCTrue=1 都代表有轮廓
+                                lineVisible = (visInt == -1 || visInt == -2 || visInt == 1);
+                            }
+                        }
+                        catch { }
+
+                        _copiedFontSettings.HasOutline = lineVisible;
+                        if (lineVisible)
+                        {
+                            try { _copiedFontSettings.OutlineColorRGB = (int)fontLine.ForeColor.RGB; } catch { }
+                            try { _copiedFontSettings.OutlineTransparency = (float)fontLine.Transparency; } catch { }
+                            try { _copiedFontSettings.OutlineWeight = (float)fontLine.Weight; } catch { }
+                            try { _copiedFontSettings.OutlineDashStyle = (int)fontLine.DashStyle; } catch { }
+                        }
+                    }
+                    catch { }
+
+                    // 复制突出显示高亮
+                    try
+                    {
+                        dynamic hl = font2.Highlight;
+                        int hlType = Convert.ToInt32(hl.Type);
+                        if (hlType != 0)
+                        {
+                            int rgb = (int)hl.RGB;
+                            // 如果高亮颜色为 0 (代表无高亮，或极其罕见的纯黑色高亮)，则不认为有高亮
+                            if (rgb != 0)
+                            {
+                                _copiedFontSettings.HighlightRGB = rgb;
+                                _copiedFontSettings.HasHighlight = true;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                catch { }
+            }
+            catch { }
+        }
+
+        private void CopyShapeFormat(Shape sourceShape, string option)
+        {
+            _currentShapeCopyOption = option;
+            _copiedShapeSettings = new CopiedShapeSettings();
+            _copiedShapeSettings.HasValue = true;
+
+            // 如果是全部，执行原生 PickUp
+            if (option == "All")
+            {
+                try
+                {
+                    sourceShape.PickUp();
+                }
+                catch { }
+            }
+
+            try
+            {
+                var fill = sourceShape.Fill;
+                _copiedShapeSettings.FillVisible = fill.Visible == Office.MsoTriState.msoTrue;
+                if (_copiedShapeSettings.FillVisible)
+                {
+                    _copiedShapeSettings.FillForeColorRGB = fill.ForeColor.RGB;
+                    _copiedShapeSettings.FillTransparency = fill.Transparency;
+                    try
+                    {
+                        _copiedShapeSettings.FillBackColorRGB = fill.BackColor.RGB;
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            try
+            {
+                var line = sourceShape.Line;
+                _copiedShapeSettings.LineVisible = line.Visible == Office.MsoTriState.msoTrue;
+                if (_copiedShapeSettings.LineVisible)
+                {
+                    _copiedShapeSettings.LineColorRGB = line.ForeColor.RGB;
+                    _copiedShapeSettings.LineTransparency = line.Transparency;
+                    _copiedShapeSettings.LineWeight = line.Weight;
+                    _copiedShapeSettings.LineStyle = line.Style;
+                    _copiedShapeSettings.LineDashStyle = line.DashStyle;
+                }
+            }
+            catch { }
+
+            // 如果包含文字，同时复制其文字格式 (默认 All 选项)
+            if (sourceShape.HasTextFrame == Office.MsoTriState.msoTrue && sourceShape.TextFrame.HasText == Office.MsoTriState.msoTrue)
+            {
+                CopyShapeTextFormat(sourceShape);
+            }
+            else
+            {
+                _copiedFontSettings = new CopiedFontSettings { HasValue = false };
+            }
+        }
+
+        private void ApplyFont2Format(dynamic font2, string option)
+        {
+            if (!_copiedFontSettings.HasValue) return;
+
+            // 字体名称
+            if (option == "All" || option == "FontName")
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(_copiedFontSettings.Name))
+                        font2.Name = _copiedFontSettings.Name;
+                    if (!string.IsNullOrEmpty(_copiedFontSettings.NameFarEast))
+                        font2.NameFarEast = _copiedFontSettings.NameFarEast;
+                    if (!string.IsNullOrEmpty(_copiedFontSettings.NameAscii))
+                        font2.NameAscii = _copiedFontSettings.NameAscii;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format FontName error: {ex.Message}");
+                }
+            }
+
+            // 字号
+            if (option == "All" || option == "Size")
+            {
+                try
+                {
+                    if (_copiedFontSettings.Size > 0)
+                        font2.Size = _copiedFontSettings.Size;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format Size error: {ex.Message}");
+                }
+            }
+
+            // 文字颜色 + 文字轮廓
+            if (option == "All" || option == "Color")
+            {
+                try
+                {
+                    font2.Fill.ForeColor.RGB = _copiedFontSettings.ColorRGB;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format FillColor error: {ex.Message}");
+                }
+
+                try
+                {
+                    font2.Fill.Transparency = _copiedFontSettings.Transparency;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format FillTransparency error: {ex.Message}");
+                }
+
+                // 文字轮廓（描边）——匹配 VBA: shp.TextFrame2.TextRange.Font.Line
+                try
+                {
+                    dynamic fontLine = font2.Line;
+                    if (_copiedFontSettings.HasOutline)
+                    {
+                        // 尝试以多种方式设置 Visible 属性为 true
+                        try { fontLine.Visible = Office.MsoTriState.msoTrue; }
+                        catch
+                        {
+                            try { fontLine.Visible = -1; }
+                            catch
+                            {
+                                try { fontLine.Visible = true; }
+                                catch { }
+                            }
+                        }
+
+                        try { fontLine.ForeColor.RGB = _copiedFontSettings.OutlineColorRGB; } catch { }
+                        try { fontLine.Transparency = _copiedFontSettings.OutlineTransparency; } catch { }
+                        try { fontLine.Weight = _copiedFontSettings.OutlineWeight > 0 ? _copiedFontSettings.OutlineWeight : 1.5f; } catch { }
+                        
+                        try { fontLine.DashStyle = (Office.MsoLineDashStyle)_copiedFontSettings.OutlineDashStyle; }
+                        catch
+                        {
+                            try { fontLine.DashStyle = _copiedFontSettings.OutlineDashStyle; }
+                            catch { }
+                        }
+                    }
+                    else
+                    {
+                        // 尝试以多种方式设置 Visible 属性为 false
+                        try { fontLine.Visible = Office.MsoTriState.msoFalse; }
+                        catch
+                        {
+                            try { fontLine.Visible = 0; }
+                            catch
+                            {
+                                try { fontLine.Visible = false; }
+                                catch { }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format Outline error: {ex.Message}");
+                }
+
+                // 突出显示高亮
+                try
+                {
+                    if (_copiedFontSettings.HasHighlight)
+                    {
+                        font2.Highlight.RGB = _copiedFontSettings.HighlightRGB;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format Highlight error: {ex.Message}");
+                }
+            }
+
+            // 文字效果
+            if (option == "All" || option == "Effect")
+            {
+                try
+                {
+                    font2.Shadow = _copiedFontSettings.Shadow;
+                    font2.Emboss = _copiedFontSettings.Emboss;
+                    font2.BaselineOffset = _copiedFontSettings.BaselineOffset;
+                    font2.Subscript = _copiedFontSettings.Subscript;
+                    font2.Superscript = _copiedFontSettings.Superscript;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format BasicEffect error: {ex.Message}");
+                }
+
+                // 发光效果
+                try
+                {
+                    if (_copiedFontSettings.HasGlow)
+                    {
+                        font2.Glow.Radius = _copiedFontSettings.GlowRadius;
+                        font2.Glow.Transparency = _copiedFontSettings.GlowTransparency;
+                        font2.Glow.Color.RGB = _copiedFontSettings.GlowColorRGB;
+                    }
+                    else
+                    {
+                        font2.Glow.Radius = 0;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format Glow error: {ex.Message}");
+                }
+
+                // 倒影效果
+                try
+                {
+                    font2.Reflection.Type = (Office.MsoReflectionType)_copiedFontSettings.ReflectionType;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format Reflection error: {ex.Message}");
+                }
+            }
+
+            // 加粗 / 斜体 / 下划线
+            if (option == "All")
+            {
+                try
+                {
+                    font2.Bold = _copiedFontSettings.Bold;
+                    font2.Italic = _copiedFontSettings.Italic;
+
+                    if (_copiedFontSettings.Underline == Office.MsoTriState.msoTrue)
+                        font2.UnderlineStyle = 1; // msoUnderlineSingleLine
+                    else
+                        font2.UnderlineStyle = 0; // msoNoUnderline
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyFont2Format BoldItalicUnderline error: {ex.Message}");
+                }
+            }
+        }
+
+        private void ApplyPowerPointFontFormat(PowerPoint.Font font, string option)
+        {
+            if (!_copiedFontSettings.HasValue) return;
+
+            try
+            {
+                if (option == "All" || option == "FontName")
+                {
+                    if (!string.IsNullOrEmpty(_copiedFontSettings.Name))
+                        font.Name = _copiedFontSettings.Name;
+                    if (!string.IsNullOrEmpty(_copiedFontSettings.NameFarEast))
+                        font.NameFarEast = _copiedFontSettings.NameFarEast;
+                }
+                
+                if (option == "All" || option == "Size")
+                {
+                    if (_copiedFontSettings.Size > 0)
+                        font.Size = _copiedFontSettings.Size;
+                }
+                
+                if (option == "All" || option == "Color")
+                {
+                    font.Color.RGB = _copiedFontSettings.ColorRGB;
+                }
+                
+                if (option == "All" || option == "Effect")
+                {
+                    font.Shadow = _copiedFontSettings.Shadow;
+                    font.Emboss = _copiedFontSettings.Emboss;
+                    font.BaselineOffset = _copiedFontSettings.BaselineOffset;
+                    font.Subscript = _copiedFontSettings.Subscript;
+                    font.Superscript = _copiedFontSettings.Superscript;
+                }
+
+                if (option == "All")
+                {
+                    font.Bold = _copiedFontSettings.Bold;
+                    font.Italic = _copiedFontSettings.Italic;
+                    font.Underline = _copiedFontSettings.Underline;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"ApplyPowerPointFontFormat error: {ex.Message}");
+            }
+        }
+
+        private void ApplyShapeFormat(Shape targetShape, string option)
+        {
+            if (!_copiedShapeSettings.HasValue) return;
+
+            if (option == "All")
+            {
+                try
+                {
+                    targetShape.Apply();
+                }
+                catch { }
+                return;
+            }
+
+            if (option == "Fill")
+            {
+                try
+                {
+                    var fill = targetShape.Fill;
+                    if (_copiedShapeSettings.FillVisible)
+                    {
+                        fill.Visible = Office.MsoTriState.msoTrue;
+                        fill.Solid();
+                        fill.ForeColor.RGB = _copiedShapeSettings.FillForeColorRGB;
+                        fill.Transparency = _copiedShapeSettings.FillTransparency;
+                        try
+                        {
+                            fill.BackColor.RGB = _copiedShapeSettings.FillBackColorRGB;
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        fill.Visible = Office.MsoTriState.msoFalse;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyShapeFormat Fill error: {ex.Message}");
+                }
+            }
+            else if (option == "Line")
+            {
+                try
+                {
+                    var line = targetShape.Line;
+                    if (_copiedShapeSettings.LineVisible)
+                    {
+                        line.Visible = Office.MsoTriState.msoTrue;
+                        line.ForeColor.RGB = _copiedShapeSettings.LineColorRGB;
+                        line.Transparency = _copiedShapeSettings.LineTransparency;
+                        line.Weight = _copiedShapeSettings.LineWeight;
+                        line.Style = _copiedShapeSettings.LineStyle;
+                        line.DashStyle = _copiedShapeSettings.LineDashStyle;
+                    }
+                    else
+                    {
+                        line.Visible = Office.MsoTriState.msoFalse;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ApplyShapeFormat Line error: {ex.Message}");
+                }
+            }
+        }
+
+        private void copyShapeStyle_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Selection sel = app.ActiveWindow.Selection;
+                if (sel.Type == PpSelectionType.ppSelectionShapes)
+                {
+                    Shape sourceShape = sel.ShapeRange[1];
+                    CopyShapeFormat(sourceShape, _currentShapeCopyOption);
+                }
+                else
+                {
+                    MessageBox.Show("请选择一个形状来复制形状格式。", "提示");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"复制形状格式时出错: {ex.Message}");
+            }
+        }
+
+        private void copyShapeStyleOption_Click(object sender, RibbonControlEventArgs e)
+        {
+            var button = sender as Microsoft.Office.Tools.Ribbon.RibbonButton;
+            if (button == null) return;
+
+            string option = "All";
+            switch (button.Name)
+            {
+                case "copyShapeStyleAll":
+                    option = "All";
+                    break;
+                case "copyShapeStyleFill":
+                    option = "Fill";
+                    break;
+                case "copyShapeStyleLine":
+                    option = "Line";
+                    break;
+            }
+
+            try
+            {
+                Selection sel = app.ActiveWindow.Selection;
+                if (sel.Type == PpSelectionType.ppSelectionShapes)
+                {
+                    Shape sourceShape = sel.ShapeRange[1];
+                    CopyShapeFormat(sourceShape, option);
+                }
+                else
+                {
+                    _currentShapeCopyOption = option;
+                    MessageBox.Show($"已将复制形状格式选项设置为：{button.Label}。请选择一个形状以复制格式。", "提示");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"设置复制形状格式选项时出错: {ex.Message}");
+            }
+        }
+
+        private void pasteShapeStyle_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Selection sel = app.ActiveWindow.Selection;
+                if (sel.Type == PpSelectionType.ppSelectionShapes)
+                {
+                    foreach (Shape shape in sel.ShapeRange)
+                    {
+                        ApplyShapeFormat(shape, _currentShapeCopyOption);
+
+                        // 如果之前复制了文本，并且目标形状含有文本框，同时应用文本格式
+                        if (_copiedFontSettings.HasValue && shape.HasTextFrame == Office.MsoTriState.msoTrue)
+                        {
+                            try
+                            {
+                                ApplyFont2Format(shape.TextFrame2.TextRange.Font, _currentTextCopyOption);
+                            }
+                            catch { }
+
+                            try
+                            {
+                                ApplyPowerPointFontFormat(shape.TextFrame.TextRange.Font, _currentTextCopyOption);
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("请选择要应用形状格式的目标形状。", "提示");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"粘贴形状格式时出错: {ex.Message}");
+            }
+        }
+
+        private void copyTextStyle_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Selection sel = app.ActiveWindow.Selection;
+                if (sel.Type == PpSelectionType.ppSelectionText)
+                {
+                    CopyTextFormat(sel, _currentTextCopyOption);
+                }
+                else if (sel.Type == PpSelectionType.ppSelectionShapes)
+                {
+                    Shape sourceShape = sel.ShapeRange[1];
+                    if (sourceShape.HasTextFrame == Office.MsoTriState.msoTrue && sourceShape.TextFrame.HasText == Office.MsoTriState.msoTrue)
+                    {
+                        CopyShapeTextFormat(sourceShape);
+                    }
+                    else
+                    {
+                        MessageBox.Show("选中的形状中未包含任何文本。", "提示");
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("请选择文本以复制文字格式。", "提示");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"复制文字格式时出错: {ex.Message}");
+            }
+        }
+
+        private void copyTextStyleOption_Click(object sender, RibbonControlEventArgs e)
+        {
+            var button = sender as Microsoft.Office.Tools.Ribbon.RibbonButton;
+            if (button == null) return;
+
+            string option = "All";
+            switch (button.Name)
+            {
+                case "copyTextStyleAll":
+                    option = "All";
+                    break;
+                case "copyTextStyleName":
+                    option = "FontName";
+                    break;
+                case "copyTextStyleColor":
+                    option = "Color";
+                    break;
+                case "copyTextStyleSize":
+                    option = "Size";
+                    break;
+                case "copyTextStyleEffect":
+                    option = "Effect";
+                    break;
+            }
+
+            try
+            {
+                Selection sel = app.ActiveWindow.Selection;
+                if (sel.Type == PpSelectionType.ppSelectionText)
+                {
+                    CopyTextFormat(sel, option);
+                }
+                else if (sel.Type == PpSelectionType.ppSelectionShapes)
+                {
+                    Shape sourceShape = sel.ShapeRange[1];
+                    if (sourceShape.HasTextFrame == Office.MsoTriState.msoTrue && sourceShape.TextFrame.HasText == Office.MsoTriState.msoTrue)
+                    {
+                        _currentTextCopyOption = option;
+                        CopyShapeTextFormat(sourceShape);
+                    }
+                    else
+                    {
+                        _currentTextCopyOption = option;
+                        MessageBox.Show($"已将复制文字格式选项设置为：{button.Label}。", "提示");
+                    }
+                }
+                else
+                {
+                    _currentTextCopyOption = option;
+                    MessageBox.Show($"已将复制文字格式选项设置为：{button.Label}。请选择文字以复制格式。", "提示");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"设置复制文字格式选项时出错: {ex.Message}");
+            }
+        }
+
+        private void pasteTextStyle_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Selection sel = app.ActiveWindow.Selection;
+                if (sel.Type == PpSelectionType.ppSelectionText)
+                {
+                    if (_copiedFontSettings.HasValue)
+                    {
+                        try
+                        {
+                            ApplyFont2Format(sel.TextRange2.Font, _currentTextCopyOption);
+                        }
+                        catch { }
+
+                        try
+                        {
+                            ApplyPowerPointFontFormat(sel.TextRange.Font, _currentTextCopyOption);
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        MessageBox.Show("请先复制文字格式。", "提示");
+                    }
+                }
+                else if (sel.Type == PpSelectionType.ppSelectionShapes)
+                {
+                    foreach (Shape shape in sel.ShapeRange)
+                    {
+                        if (_copiedFontSettings.HasValue && shape.HasTextFrame == Office.MsoTriState.msoTrue)
+                        {
+                            try
+                            {
+                                ApplyFont2Format(shape.TextFrame2.TextRange.Font, _currentTextCopyOption);
+                            }
+                            catch { }
+
+                            try
+                            {
+                                ApplyPowerPointFontFormat(shape.TextFrame.TextRange.Font, _currentTextCopyOption);
+                            }
+                            catch { }
+                        }
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("请选择目标文本或形状来应用文字格式。", "提示");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"粘贴文字格式时出错: {ex.Message}");
+            }
+        }
+
+        private void copyGroupStyle_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                Selection sel = app.ActiveWindow.Selection;
+                if (sel.Type == PpSelectionType.ppSelectionShapes && sel.ShapeRange.Count > 0)
+                {
+                    sel.ShapeRange.Copy();
+                    _hasCopiedGroupFormat = true;
+                }
+                else
+                {
+                    MessageBox.Show("请选择一个组或多个形状来复制组格式。", "提示");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"复制组格式时出错: {ex.Message}");
+            }
+        }
+
+        private class ShapeTextInfo
+        {
+            public string Text { get; set; }
+            public float Top { get; set; }
+            public float Left { get; set; }
+            public List<string> Lines { get; set; }
+        }
+
+        private void ExtractTextsFromShape(Shape shape, List<ShapeTextInfo> textList)
+        {
+            if (shape.Type == Office.MsoShapeType.msoGroup)
+            {
+                foreach (Shape child in shape.GroupItems)
+                {
+                    ExtractTextsFromShape(child, textList);
+                }
+            }
+            else
+            {
+                if (shape.HasTextFrame == Office.MsoTriState.msoTrue && shape.TextFrame.HasText == Office.MsoTriState.msoTrue)
+                {
+                    string text = "";
+                    try
+                    {
+                        text = shape.TextFrame.TextRange.Text;
+                    }
+                    catch { }
+
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        // 提取所有行，用于可能的分拆分发
+                        string[] linesArray = text.Split(new[] { "\r\n", "\r", "\n", "\v" }, StringSplitOptions.None);
+                        List<string> linesList = new List<string>();
+                        foreach (string line in linesArray)
+                        {
+                            string trimmed = line.Trim();
+                            if (!string.IsNullOrEmpty(trimmed))
+                            {
+                                linesList.Add(trimmed);
+                            }
+                        }
+
+                        textList.Add(new ShapeTextInfo
+                        {
+                            Text = text, // 保留完整文本（含换行符）
+                            Top = shape.Top,
+                            Left = shape.Left,
+                            Lines = linesList
+                        });
+                    }
+                }
+            }
+        }
+
+        private void CollectTextShapes(Shape shape, List<Shape> list)
+        {
+            if (shape.Type == Office.MsoShapeType.msoGroup)
+            {
+                foreach (Shape child in shape.GroupItems)
+                {
+                    CollectTextShapes(child, list);
+                }
+            }
+            else
+            {
+                if (shape.HasTextFrame == Office.MsoTriState.msoTrue && shape.TextFrame.HasText == Office.MsoTriState.msoTrue)
+                {
+                    list.Add(shape);
+                }
+            }
+        }
+
+        private void DeleteShapeRange(ShapeRange shapeRange)
+        {
+            if (shapeRange == null) return;
+
+            for (int i = shapeRange.Count; i >= 1; i--)
+            {
+                try
+                {
+                    shapeRange[i].Delete();
+                }
+                catch { }
+            }
+        }
+
+        private List<Shape> GetTargetShapesFromSelection(Selection sel)
+        {
+            List<Shape> targetShapes = new List<Shape>();
+            if (sel.Type == PpSelectionType.ppSelectionShapes)
+            {
+                foreach (Shape shape in sel.ShapeRange)
+                {
+                    targetShapes.Add(shape);
+                }
+            }
+            else if (sel.Type == PpSelectionType.ppSelectionText)
+            {
+                try
+                {
+                    if (sel.ShapeRange.Count > 0)
+                    {
+                        targetShapes.Add(sel.ShapeRange[1]);
+                    }
+                }
+                catch
+                {
+                    try
+                    {
+                        dynamic parent = sel.TextRange.Parent;
+                        dynamic shape = parent.Parent;
+                        if (shape != null)
+                        {
+                            targetShapes.Add((Shape)shape);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            return targetShapes;
+        }
+
+        private void pasteGroupStyle_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                if (!_hasCopiedGroupFormat)
+                {
+                    MessageBox.Show("请先选择一个组或多个形状并点击“复制组格式”。", "提示");
+                    return;
+                }
+
+                Selection sel = app.ActiveWindow.Selection;
+                List<Shape> targetShapes = GetTargetShapesFromSelection(sel);
+
+                if (targetShapes.Count == 0)
+                {
+                    MessageBox.Show("请选择要应用格式的目标形状/组，或将光标定位在目标文本框中。", "提示");
+                    return;
+                }
+
+                // 1. 获取目标选择的包围盒位置
+                float targetLeft = float.MaxValue;
+                float targetTop = float.MaxValue;
+                bool hasCoords = false;
+                foreach (Shape s in targetShapes)
+                {
+                    try
+                    {
+                        if (s.Left < targetLeft) targetLeft = s.Left;
+                        if (s.Top < targetTop) targetTop = s.Top;
+                        hasCoords = true;
+                    }
+                    catch { }
+                }
+                if (!hasCoords)
+                {
+                    targetLeft = 0;
+                    targetTop = 0;
+                }
+
+                // 2. 提取目标选择的所有文字内容
+                List<ShapeTextInfo> targetTexts = new List<ShapeTextInfo>();
+                foreach (Shape shape in targetShapes)
+                {
+                    ExtractTextsFromShape(shape, targetTexts);
+                }
+
+                // 按 Top 排序，如果 Top 相同则按 Left 排序 (从上到下)
+                targetTexts = targetTexts
+                    .OrderBy(t => t.Top)
+                    .ThenBy(t => t.Left)
+                    .ToList();
+
+                // 3. 先粘贴并完成内容替换。不要在 Paste 之前删除原对象，
+                // 否则剪贴板/COM 失败会把用户原内容直接变成不可恢复的丢失。
+                PowerPoint.Slide slide = null;
+                try
+                {
+                    slide = app.ActiveWindow.View.Slide;
+                }
+                catch { }
+
+                if (slide == null)
+                {
+                    throw new InvalidOperationException("无法获取当前幻灯片，未修改目标对象。");
+                }
+
+                ShapeRange pastedRange = slide.Shapes.Paste();
+                if (pastedRange == null || pastedRange.Count == 0)
+                {
+                    throw new InvalidOperationException("粘贴格式失败，未修改目标对象。");
+                }
+
+                // 5. 将粘贴的组/形状移动到目标位置
+                try
+                {
+                    pastedRange.Left = targetLeft;
+                    pastedRange.Top = targetTop;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"移动粘贴形状失败: {ex.Message}");
+                }
+
+                // 6. 查找粘贴后图形中所有支持文本框的形状
+                List<Shape> pastedTextShapes = new List<Shape>();
+                foreach (Shape shape in pastedRange)
+                {
+                    CollectTextShapes(shape, pastedTextShapes);
+                }
+
+                // 按 Top 排序，如果 Top 相同则按 Left 排序 (从上到下)
+                pastedTextShapes = pastedTextShapes
+                    .OrderBy(s => s.Top)
+                    .ThenBy(s => s.Left)
+                    .ToList();
+
+                // 7. 顺序替换文字内容
+                // 判断是否需要按行分发文本。如果目标文本框数量少于粘贴后的文本框数量，且有文本框包含多行，则尝试按行分发文本
+                bool shouldSplit = false;
+                foreach (var t in targetTexts)
+                {
+                    if (t.Lines != null && t.Lines.Count > 1)
+                    {
+                        shouldSplit = true;
+                        break;
+                    }
+                }
+
+                List<string> textPieces = new List<string>();
+                if (shouldSplit && targetTexts.Count < pastedTextShapes.Count)
+                {
+                    foreach (var t in targetTexts)
+                    {
+                        if (t.Lines != null && t.Lines.Count > 0)
+                        {
+                            textPieces.AddRange(t.Lines);
+                        }
+                        else
+                        {
+                            textPieces.Add(t.Text);
+                        }
+                    }
+                }
+                else
+                {
+                    foreach (var t in targetTexts)
+                    {
+                        textPieces.Add(t.Text);
+                    }
+                }
+
+                int count = Math.Min(textPieces.Count, pastedTextShapes.Count);
+                if (textPieces.Count > pastedTextShapes.Count)
+                {
+                    // Never discard target text when the copied group does not
+                    // contain enough text-bearing shapes to receive it.
+                    DeleteShapeRange(pastedRange);
+                    MessageBox.Show("复制的组格式没有足够的文本框承载目标内容，原目标对象已保留。", "粘贴失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                bool replacementSucceeded = true;
+                for (int i = 0; i < count; i++)
+                {
+                    try
+                    {
+                        pastedTextShapes[i].TextFrame.TextRange.Text = textPieces[i];
+                    }
+                    catch (Exception ex)
+                    {
+                        replacementSucceeded = false;
+                        System.Diagnostics.Debug.WriteLine($"设置文本出错: {ex.Message}");
+                    }
+                }
+
+                if (!replacementSucceeded)
+                {
+                    // 回滚新粘贴的对象，保留原目标对象。
+                    DeleteShapeRange(pastedRange);
+
+                    MessageBox.Show("组格式中的文字替换失败，原目标对象已保留。", "粘贴失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 4. 只有完整粘贴成功后才删除原目标选择。
+                foreach (Shape shape in targetShapes)
+                {
+                    try
+                    {
+                        shape.Delete();
+                    }
+                    catch { }
+                }
+
+                // 5. 选中新粘贴的图形
+                try
+                {
+                    pastedRange.Select();
+                }
+                catch { }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"粘贴组格式时出错: {ex.Message}", "错误");
+            }
+        }
+
+        private void pastePictureAndText(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                if (scaleForm == null || scaleForm.IsDisposed)
+                {
+                    scaleForm = new ScaleForm(app, selectedShapeIdsByOrder);
+                    scaleForm.Show();
+                }
+                else
+                {
+                    scaleForm.Activate();
+                    scaleForm.RefreshSelection();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"打开图文同缩窗口失败: {ex.Message}");
+            }
+        }
+
+        private void selectAllTextBoxesButton_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                if (app == null || app.ActivePresentation == null || app.ActiveWindow == null)
+                {
+                    return;
+                }
+
+                PowerPoint.Slide slide = null;
+                try
+                {
+                    slide = app.ActiveWindow.View.Slide;
+                }
+                catch
+                {
+                    // 在某些视图下（如幻灯片浏览视图），获取 Slide 可能会抛出异常
+                }
+
+                if (slide == null)
+                {
+                    MessageBox.Show("请先选择一张幻灯片。", "提示");
+                    return;
+                }
+
+                if (slide.Shapes.Count == 0)
+                {
+                    MessageBox.Show("当前页面没有可以选中的对象。", "提示");
+                    return;
+                }
+
+                bool isFirst = true;
+                foreach (Shape shape in slide.Shapes)
+                {
+                    // 判断是否为文本框或包含文本框的占位符
+                    if (shape.Type == Office.MsoShapeType.msoTextBox ||
+                        (shape.Type == Office.MsoShapeType.msoPlaceholder && shape.HasTextFrame == Office.MsoTriState.msoTrue))
+                    {
+                        if (isFirst)
+                        {
+                            shape.Select(Office.MsoTriState.msoTrue);
+                            isFirst = false;
+                        }
+                        else
+                        {
+                            shape.Select(Office.MsoTriState.msoFalse);
+                        }
+                    }
+                }
+
+                if (isFirst)
+                {
+                    MessageBox.Show("未在当前幻灯片中找到文本框。", "提示");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"全选文本框时出错: {ex.Message}");
+            }
+        }
+
+        private void imgAutoAlign_rowSpace_TextChanged(object sender, RibbonControlEventArgs e)
+        {
+            string rowSpaceText = imgAutoAlign_rowSpace.Text ?? string.Empty;
+            int approxIndex = rowSpaceText.IndexOf('≈');
+            if (approxIndex >= 0 && approxIndex + 1 < rowSpaceText.Length)
+            {
+                string approxText = rowSpaceText.Substring(approxIndex + 1);
+                Match fontSizeMatch = Regex.Match(approxText, @"[-+]?\d+(?:[.,]\d+)?");
+                if (fontSizeMatch.Success)
+                {
+                    fontSizeEditBox.Text = fontSizeMatch.Value.Replace(',', '.');
+                }
+            }
+            AlignPics(showValidationErrors: false);
+        }
+
+        private void imgAutoAlign_colNum_TextChanged(object sender, RibbonControlEventArgs e)
+        {
+            AlignPics(showValidationErrors: false);
+        }
+
+        private void imgAutoAlign_colSpace_TextChanged(object sender, RibbonControlEventArgs e)
+        {
+            AlignPics(showValidationErrors: false);
+        }
+
+        private void imgWidthEditBpx_TextChanged(object sender, RibbonControlEventArgs e)
+        {
+            AlignPics(showValidationErrors: false);
+        }
+
+        private void imgHeightEditBox_TextChanged(object sender, RibbonControlEventArgs e)
+        {
+            AlignPics(showValidationErrors: false);
+        }
+
+        private void excludeTextcheckBox_Click(object sender, RibbonControlEventArgs e) { }
+
+        private void excludeTextcheckBox2_Click(object sender, RibbonControlEventArgs e) { }
+
+        private void donate(object sender, RibbonControlEventArgs e)
+        {
+            System.Diagnostics.Process.Start("https://github.com/CaptainMusX/SlideSCI-Focus");
+        }
+
+        private void developer_website(object sender, RibbonControlEventArgs e)
+        {
+            System.Diagnostics.Process.Start("https://github.com/CaptainMusX");
+        }
+        public void ExportOriginalImage_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                // 1. 获取当前PowerPoint应用实例和选中的对象
+                var app = Globals.ThisAddIn.Application;
+                var activeWindow = app.ActiveWindow;
+
+                if (app.ActivePresentation == null)
+                {
+                    MessageBox.Show("请先打开一个演示文稿。", "操作失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 检查是否选中了图形
+                if (activeWindow.Selection.Type != PpSelectionType.ppSelectionShapes)
+                {
+                    MessageBox.Show("请先选择一个图片。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // 检查是否只选中了一个图形
+                var shapeRange = activeWindow.Selection.ShapeRange;
+                if (shapeRange.Count != 1)
+                {
+                    MessageBox.Show("请只选择一个图片进行导出。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var shape = shapeRange[1];
+
+                if (!IsPictureShape(shape))
+                {
+                    MessageBox.Show("所选对象不是图片，请重新选择。", "操作提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 2. 获取必要信息：Shape ID, Slide Object 和演示文稿路径
+                uint shapeId = (uint)shape.Id;
+                Slide vstoSlide = shape.Parent;
+                uint slideIdValue = (uint)vstoSlide.SlideID; // 获取幻灯片的唯一ID
+
+                // 保存演示文稿以确保图片文件嵌入正确
+                app.ActivePresentation.Save();
+                string presentationPath = app.ActivePresentation.FullName;
+
+                // 确保演示文稿已保存
+                if (string.IsNullOrEmpty(presentationPath) || !File.Exists(presentationPath))
+                {
+                    MessageBox.Show("请先保存当前演示文稿再执行导出操作。", "操作失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // 3. 使用 Open XML SDK 进行操作
+                using (PresentationDocument presDoc = PresentationDocument.Open(presentationPath, false)) // false = read-only
+                {
+                    PresentationPart presPart = presDoc.PresentationPart;
+                    if (presPart == null)
+                    {
+                        MessageBox.Show("无法加载演示文稿的核心部分。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    // 4. 通过 SlideID 查找对应的 SlideId 条目，从而获取其 RelationshipId
+                    var slideIdEntry = presPart.Presentation.SlideIdList.ChildElements
+                        .OfType<DocumentFormat.OpenXml.Presentation.SlideId>()
+                        .FirstOrDefault(s => s.Id != null && s.Id.Value == slideIdValue);
+
+                    if (slideIdEntry == null || slideIdEntry.RelationshipId == null)
+                    {
+                        MessageBox.Show("无法在文档结构中定位到当前幻灯片。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    // 使用 RelationshipId 精确获取 SlidePart
+                    SlidePart slidePart = presPart.GetPartById(slideIdEntry.RelationshipId.Value) as SlidePart;
+                    if (slidePart == null)
+                    {
+                        MessageBox.Show("无法加载幻灯片部分，文件可能已损坏。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    // 5. 在幻灯片中查找匹配的 Picture 元素并获取其关系 ID (rId)
+                    string embedId = null;
+                    var picture = slidePart.Slide
+                        .Descendants<DocumentFormat.OpenXml.Presentation.Picture>()
+                        .FirstOrDefault(p => p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value == shapeId);
+
+                    if (picture != null)
+                    {
+                        embedId = picture.BlipFill?.Blip?.Embed?.Value;
+                    }
+
+                    if (string.IsNullOrEmpty(embedId))
+                    {
+                        MessageBox.Show("无法找到选中图片的内部引用关系，导出失败。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    // 6. 通过关系ID找到对应的 ImagePart
+                    ImagePart imagePart = slidePart.GetPartById(embedId) as ImagePart;
+                    if (imagePart == null)
+                    {
+                        MessageBox.Show("无法在文档包中找到图片数据，导出失败。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    // 7. 准备保存文件对话框并导出
+                    using (SaveFileDialog saveFileDialog = new SaveFileDialog())
+                    {
+                        string originalFileName = Path.GetFileName(imagePart.Uri.OriginalString);
+                        saveFileDialog.FileName = originalFileName;
+                        saveFileDialog.Filter = "所有文件 (*.*)|*.*|PNG 图片 (*.png)|*.png|JPEG 图片 (*.jpg;*.jpeg)|*.jpg;*.jpeg|GIF 图片 (*.gif)|*.gif";
+                        saveFileDialog.Title = "导出原始图片";
+
+                        if (saveFileDialog.ShowDialog() == DialogResult.OK)
+                        {
+                            using (Stream imageStream = imagePart.GetStream())
+                            using (FileStream fileStream = new FileStream(saveFileDialog.FileName, FileMode.Create))
+                            {
+                                imageStream.CopyTo(fileStream);
+                            }
+                            MessageBox.Show($"图片已成功导出到：\n{saveFileDialog.FileName}", "导出成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                MessageBox.Show($"导出过程中发生错误：\n{ex.Message}", "意外错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+        private void exportImageButton_Click(object sender, RibbonControlEventArgs e)
+        {
+            PowerPoint.Application pptApp = Globals.ThisAddIn.Application;
+            PowerPoint.Presentation activePresentation;
+            PowerPoint.Slides slides;
+
+            try
+            {
+                activePresentation = pptApp.ActivePresentation;
+                if (activePresentation == null)
+                {
+                    MessageBox.Show(
+                        "没有打开的演示文稿可供导出。",
+                        "无演示文稿",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning
+                    );
+                    return;
+                }
+                slides = activePresentation.Slides;
+            }
+            catch (Exception)
+            {
+                MessageBox.Show(
+                    "无法访问演示文稿。请确保已打开一个演示文稿。",
+                    "访问错误",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+                return;
+            }
+
+            if (slides == null || slides.Count == 0)
+            {
+                MessageBox.Show(
+                    "当前演示文稿没有幻灯片。",
+                    "无幻灯片",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning
+                );
+                return;
+            }
+
+            // Create export options dialog
+            using (Form exportDialog = new Form())
+            {
+                exportDialog.Text = "导出设置";
+                exportDialog.Width = 400;
+                exportDialog.Height = 380; // Increase height for new PDF options and checkbox
+                exportDialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                exportDialog.StartPosition = FormStartPosition.CenterScreen;
+                exportDialog.MaximizeBox = false;
+                exportDialog.MinimizeBox = false;
+
+                GroupBox rangeGroup = new GroupBox
+                {
+                    Text = "导出范围",
+                    Location = new System.Drawing.Point(20, 20),
+                    Width = 340,
+                    Height = 85,
+                };
+                RadioButton currentSlideRadio = new RadioButton
+                {
+                    Text = "当前页",
+                    Location = new System.Drawing.Point(20, 25),
+                    Checked = true,
+                    AutoSize = true,
+                };
+                RadioButton selectedSlidesRadio = new RadioButton
+                {
+                    Text = "选中的页面",
+                    Location = new System.Drawing.Point(120, 25),
+                    AutoSize = true,
+                };
+                RadioButton allSlidesRadio = new RadioButton
+                {
+                    Text = "全部页面",
+                    Location = new System.Drawing.Point(20, 50),
+                    AutoSize = true,
+                };
+                rangeGroup.Controls.AddRange(
+                    new Control[] { currentSlideRadio, selectedSlidesRadio, allSlidesRadio }
+                );
+
+                GroupBox formatGroup = new GroupBox
+                {
+                    Text = "图片格式",
+                    Location = new System.Drawing.Point(20, 115),
+                    Width = 340,
+                    Height = 60,
+                };
+                ComboBox formatCombo = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Location = new System.Drawing.Point(20, 25),
+                    Width = 300,
+                };
+                formatCombo.Items.AddRange(new string[] { "PNG", "JPG", "BMP", "PDF" });
+                formatCombo.SelectedIndex = 0; // Default to PNG
+                formatGroup.Controls.Add(formatCombo);
+
+                GroupBox pdfOptionsGroup = new GroupBox
+                {
+                    Text = "PDF 选项",
+                    Location = new System.Drawing.Point(20, 185),
+                    Width = 340,
+                    Height = 60,
+                    Visible = false,
+                };
+                CheckBox pdfSeparateFilesCheckBox = new CheckBox
+                {
+                    Text = "每页导出为单独的PDF文件",
+                    Location = new System.Drawing.Point(20, 25),
+                    AutoSize = true,
+                    Checked = false,
+                };
+                pdfOptionsGroup.Controls.Add(pdfSeparateFilesCheckBox);
+
+                GroupBox dpiGroup = new GroupBox
+                {
+                    Text = "导出DPI",
+                    Location = new System.Drawing.Point(20, 185),
+                    Width = 340,
+                    Height = 60,
+                }; // Adjusted Y
+                ComboBox dpiCombo = new ComboBox
+                {
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    Location = new System.Drawing.Point(20, 25),
+                    Width = 300,
+                    BackColor = Color.White,
+                };
+                dpiCombo.Items.AddRange(new string[] { "96", "150", "300", "600" });
+                dpiCombo.SelectedIndex = 2; // Default to 300 DPI
+                dpiGroup.Controls.Add(dpiCombo);
+
+                // Event handler for format change to hide/show DPI group and PDF options
+                formatCombo.SelectedIndexChanged += (s, args) =>
+                {
+                    bool isPdf = formatCombo.SelectedItem.ToString().ToUpper() == "PDF";
+                    dpiGroup.Visible = !isPdf;
+                    pdfOptionsGroup.Visible = isPdf;
+                    // Adjust layout if PDF options are shown/hidden
+                    if (isPdf)
+                    {
+                        dpiGroup.Location = new System.Drawing.Point(
+                            20,
+                            185 + pdfOptionsGroup.Height + 10
+                        ); // Move DPI group below PDF options
+                    }
+                    else
+                    {
+                        dpiGroup.Location = new System.Drawing.Point(20, 185); // Reset DPI group position
+                    }
+                };
+                // Initial state for DPI group and PDF options visibility
+                bool initialIsPdf = formatCombo.SelectedItem.ToString().ToUpper() == "PDF";
+                dpiGroup.Visible = !initialIsPdf;
+                pdfOptionsGroup.Visible = initialIsPdf;
+                if (initialIsPdf)
+                {
+                    dpiGroup.Location = new System.Drawing.Point(
+                        20,
+                        185 + pdfOptionsGroup.Height + 10
+                    );
+                }
+
+                // 添加导出后打开文件夹的复选框
+                CheckBox openFolderCheckBox = new CheckBox
+                {
+                    Text = "导出完成后打开文件夹",
+                    Location = new System.Drawing.Point(20, 255), // Adjusted Y position
+                    AutoSize = true,
+                    Checked = true, // 默认选中
+                };
+
+                Button okButton = new Button
+                {
+                    Text = "确定",
+                    DialogResult = DialogResult.OK,
+                    Location = new System.Drawing.Point(180, 285),
+                    Width = 80,
+                    Height = 36,
+                }; // Adjusted Y
+                Button cancelButton = new Button
+                {
+                    Text = "取消",
+                    DialogResult = DialogResult.Cancel,
+                    Location = new System.Drawing.Point(280, 285),
+                    Width = 80,
+                    Height = 36,
+                }; // Adjusted Y
+
+                exportDialog.Controls.AddRange(
+                    new Control[]
+                    {
+                        rangeGroup,
+                        formatGroup,
+                        pdfOptionsGroup,
+                        dpiGroup,
+                        openFolderCheckBox,
+                        okButton,
+                        cancelButton,
+                    }
+                );
+                exportDialog.AcceptButton = okButton;
+                exportDialog.CancelButton = cancelButton;
+
+                if (exportDialog.ShowDialog() == DialogResult.OK)
+                {
+                    string basePresentationName = "未命名";
+                    string presentationCurrentFullPath = ""; // Best guess for the full path of the PPT file itself
+                    string saveTargetDirectory;
+
+                    try
+                    {
+                        string pptPathProperty = activePresentation.Path; // Can be URL or local directory path
+                        string pptFullNameProperty = activePresentation.FullName; // Can be URL or local full file path
+
+                        if (string.IsNullOrEmpty(pptPathProperty)) // Unsaved presentation
+                        {
+                            basePresentationName = "未命名";
+                            presentationCurrentFullPath = Path.Combine(
+                                Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
+                                basePresentationName + ".pptx"
+                            ); // Nominal path
+                        }
+                        else
+                        {
+                            basePresentationName = Path.GetFileNameWithoutExtension(
+                                pptFullNameProperty
+                            );
+                            if (
+                                string.IsNullOrEmpty(basePresentationName)
+                                && !string.IsNullOrEmpty(pptPathProperty)
+                            ) // Handle cases where FullName might be just a path
+                            {
+                                basePresentationName = Path.GetFileNameWithoutExtension(
+                                    pptPathProperty
+                                );
+                            }
+                            if (string.IsNullOrEmpty(basePresentationName))
+                                basePresentationName = "未命名";
+
+                            if (
+                                pptPathProperty.StartsWith(
+                                    "https://d.docs.live.net/",
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            )
+                            {
+                                string oneDriveRoot = GetLocalOneDrivePath();
+                                if (
+                                    !string.IsNullOrEmpty(oneDriveRoot)
+                                    && Directory.Exists(oneDriveRoot)
+                                )
+                                {
+                                    // Example URL: https://d.docs.live.net/USERID/Documents/MyPresentation.pptx
+                                    // pathSegments: ["https:", "", "d.docs.live.net", "USERID", "Documents", "MyPresentation.pptx"] (from Split)
+                                    string[] pathSegments = pptPathProperty.Split(
+                                        new[] { '/' },
+                                        StringSplitOptions.RemoveEmptyEntries
+                                    );
+                                    if (pathSegments.Length > 3) // Check for at least "https:", "d.docs.live.net", "USERID", and one more part
+                                    {
+                                        string relativePath = string.Join(
+                                            Path.DirectorySeparatorChar.ToString(),
+                                            pathSegments.Skip(3)
+                                        );
+                                        // For OneDrive URLs, construct local path by combining OneDrive root with the relative path
+                                        // relativePath already includes the filename since we took all path segments after the user ID
+                                        presentationCurrentFullPath = Path.Combine(
+                                            oneDriveRoot,
+                                            relativePath
+                                        );
+                                        // The line below was causing an extra folder with pptx name, pptFullNameProperty should be used for extension
+                                        // presentationCurrentFullPath = Path.Combine(presentationCurrentFullPath, basePresentationName + ".pptx");
+                                        // Corrected: pptFullNameProperty might already be the full local path if synced
+                                        if (!File.Exists(Path.Combine(oneDriveRoot, relativePath))) // If relative path isn't the full file path
+                                        {
+                                            presentationCurrentFullPath = Path.Combine(
+                                                oneDriveRoot,
+                                                relativePath,
+                                                Path.GetFileName(pptFullNameProperty)
+                                            );
+                                        }
+                                        else
+                                        {
+                                            presentationCurrentFullPath = Path.Combine(
+                                                oneDriveRoot,
+                                                relativePath
+                                            );
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Fallback if URL structure is unexpected, try to use OneDrive root + filename
+                                        presentationCurrentFullPath = Path.Combine(
+                                            oneDriveRoot,
+                                            basePresentationName
+                                                + Path.GetExtension(pptFullNameProperty)
+                                        );
+                                    }
+                                }
+                                else
+                                {
+                                    presentationCurrentFullPath = Path.Combine(
+                                        Environment.GetFolderPath(
+                                            Environment.SpecialFolder.MyPictures
+                                        ),
+                                        basePresentationName
+                                            + Path.GetExtension(pptFullNameProperty)
+                                    );
+                                }
+                            }
+                            else if (File.Exists(pptFullNameProperty)) // Local file or synced cloud file where FullName is a disk path
+                            {
+                                presentationCurrentFullPath = pptFullNameProperty;
+                            }
+                            else // Other web URLs or unresolvable local paths
+                            {
+                                string fallbackDir = GetLocalOneDrivePath();
+                                if (
+                                    string.IsNullOrEmpty(fallbackDir)
+                                    || !Directory.Exists(fallbackDir)
+                                )
+                                {
+                                    fallbackDir = Environment.GetFolderPath(
+                                        Environment.SpecialFolder.MyPictures
+                                    );
+                                }
+                                presentationCurrentFullPath = Path.Combine(
+                                    fallbackDir,
+                                    basePresentationName + Path.GetExtension(pptFullNameProperty)
+                                );
+                            }
+                        }
+
+                        // Determine the directory for SaveFileDialog: [DirectoryOfPPT]/[BasePresentationName]/
+                        saveTargetDirectory = Path.GetDirectoryName(presentationCurrentFullPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"Error determining path information: {ex.Message}"
+                        );
+                        basePresentationName = "未命名";
+                        saveTargetDirectory = Environment.GetFolderPath(
+                            Environment.SpecialFolder.MyPictures
+                        );
+                    }
+
+                    using (var saveDialog = new SaveFileDialog())
+                    {
+                        string selectedFormat = formatCombo.SelectedItem.ToString().ToUpper();
+                        bool exportPdfAsSeparateFiles =
+                            selectedFormat == "PDF" && pdfSeparateFilesCheckBox.Checked;
+
+                        saveDialog.Filter = $"{selectedFormat} 文件|*.{selectedFormat.ToLower()}";
+                        saveDialog.InitialDirectory = saveTargetDirectory;
+
+                        bool exportCurrentSlide = currentSlideRadio.Checked;
+                        bool exportSelectedSlides = selectedSlidesRadio.Checked;
+                        PowerPoint.Slide slideToExport = null;
+                        PowerPoint.SlideRange selectedSlideRange = null;
+
+                        if (exportCurrentSlide)
+                        {
+                            try
+                            {
+                                slideToExport = pptApp.ActiveWindow.View.Slide;
+                                saveDialog.FileName =
+                                    $"{basePresentationName}_页面{slideToExport.SlideIndex}";
+                            }
+                            catch (Exception ex)
+                            {
+                                System.Diagnostics.Debug.WriteLine(
+                                    $"Error getting current slide: {ex.Message}"
+                                );
+                                MessageBox.Show(
+                                    "无法获取当前幻灯片信息。将默认文件名。",
+                                    "警告",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Warning
+                                );
+                                saveDialog.FileName = $"{basePresentationName}_页面";
+                            }
+                        }
+                        else if (exportSelectedSlides)
+                        {
+                            try
+                            {
+                                if (
+                                    pptApp.ActiveWindow.Selection.Type
+                                    == PpSelectionType.ppSelectionSlides
+                                )
+                                {
+                                    selectedSlideRange = pptApp.ActiveWindow.Selection.SlideRange;
+                                    if (selectedSlideRange.Count > 0)
+                                    {
+                                        if (
+                                            selectedFormat == "PDF" && !exportPdfAsSeparateFiles
+                                            || selectedSlideRange.Count == 1
+                                        )
+                                        {
+                                            saveDialog.FileName = $"{basePresentationName}_页面"; // For single PDF or single selected slide
+                                        }
+                                        else
+                                        {
+                                            // For multiple slides to image format, or separate PDFs, suggest a base name
+                                            saveDialog.FileName = $"{basePresentationName}_页面";
+                                        }
+                                    }
+                                    else
+                                    {
+                                        MessageBox.Show(
+                                            "没有选中的幻灯片。请先选择幻灯片。",
+                                            "无选中幻灯片",
+                                            MessageBoxButtons.OK,
+                                            MessageBoxIcon.Warning
+                                        );
+                                        return;
+                                    }
+                                }
+                                else
+                                {
+                                    MessageBox.Show(
+                                        "请先在幻灯片浏览视图或大纲视图中选择幻灯片。",
+                                        "选择模式错误",
+                                        MessageBoxButtons.OK,
+                                        MessageBoxIcon.Warning
+                                    );
+                                    return;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                System.Diagnostics.Debug.WriteLine(
+                                    $"Error getting selected slides: {ex.Message}"
+                                );
+                                MessageBox.Show(
+                                    "无法获取选中的幻灯片信息。将默认文件名。",
+                                    "警告",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Warning
+                                );
+                                saveDialog.FileName = $"{basePresentationName}_选中的页面";
+                            }
+                        }
+                        else // Exporting all slides
+                        {
+                            if (selectedFormat == "PDF" && !exportPdfAsSeparateFiles)
+                            {
+                                saveDialog.FileName = $"{basePresentationName}";
+                            }
+                            else
+                            {
+                                saveDialog.FileName = $"{basePresentationName}_页面";
+                            }
+                        }
+
+                        if (saveDialog.ShowDialog() == DialogResult.OK)
+                        {
+                            string exportPath = saveDialog.FileName; // Full path from SaveFileDialog
+                            string exportDirectory = Path.GetDirectoryName(exportPath);
+                            string baseExportFileName = Path.GetFileNameWithoutExtension(
+                                exportPath
+                            );
+
+                            // Ensure the target directory exists before exporting
+                            if (!Directory.Exists(exportDirectory))
+                            {
+                                try
+                                {
+                                    Directory.CreateDirectory(exportDirectory);
+                                }
+                                catch (Exception ex)
+                                {
+                                    MessageBox.Show(
+                                        $"无法创建导出目录 '{exportDirectory}': {ex.Message}",
+                                        "目录创建错误",
+                                        MessageBoxButtons.OK,
+                                        MessageBoxIcon.Error
+                                    );
+                                    return;
+                                }
+                            }
+
+                            try
+                            {
+                                if (selectedFormat == "PDF")
+                                {
+                                    if (exportPdfAsSeparateFiles)
+                                    {
+                                        if (exportCurrentSlide && slideToExport != null)
+                                        {
+                                            string filePath = Path.Combine(
+                                                exportDirectory,
+                                                $"{baseExportFileName}.pdf"
+                                            );
+                                            ExportSlideAsPdf(
+                                                activePresentation,
+                                                slideToExport.SlideIndex,
+                                                filePath
+                                            );
+                                        }
+                                        else if (
+                                            exportSelectedSlides
+                                            && selectedSlideRange != null
+                                            && selectedSlideRange.Count > 0
+                                        )
+                                        {
+                                            foreach (PowerPoint.Slide slide in selectedSlideRange)
+                                            {
+                                                string filePath = Path.Combine(
+                                                    exportDirectory,
+                                                    $"{baseExportFileName}{slide.SlideIndex}.pdf"
+                                                );
+                                                ExportSlideAsPdf(
+                                                    activePresentation,
+                                                    slide.SlideIndex,
+                                                    filePath
+                                                );
+                                            }
+                                        }
+                                        else if (!exportCurrentSlide && !exportSelectedSlides) // All slides
+                                        {
+                                            for (int i = 1; i <= slides.Count; i++)
+                                            {
+                                                PowerPoint.Slide slide = slides[i];
+                                                string filePath = Path.Combine(
+                                                    exportDirectory,
+                                                    $"{baseExportFileName}{slide.SlideIndex}.pdf"
+                                                );
+                                                ExportSlideAsPdf(
+                                                    activePresentation,
+                                                    slide.SlideIndex,
+                                                    filePath
+                                                );
+                                                System.Runtime.InteropServices.Marshal.ReleaseComObject(
+                                                    slide
+                                                );
+                                                slide = null;
+                                            }
+                                        }
+                                    }
+                                    else // Export as a single PDF
+                                    {
+                                        if (exportCurrentSlide && slideToExport != null)
+                                        {
+                                            activePresentation
+                                                .Slides.Range(
+                                                    new int[] { slideToExport.SlideIndex }
+                                                )
+                                                .Select();
+                                            activePresentation.ExportAsFixedFormat(
+                                                Path: exportPath,
+                                                FixedFormatType: PpFixedFormatType.ppFixedFormatTypePDF,
+                                                Intent: PpFixedFormatIntent.ppFixedFormatIntentPrint,
+                                                OutputType: PpPrintOutputType.ppPrintOutputSlides,
+                                                RangeType: PpPrintRangeType.ppPrintSelection
+                                            );
+                                        }
+                                        else if (
+                                            exportSelectedSlides
+                                            && selectedSlideRange != null
+                                            && selectedSlideRange.Count > 0
+                                        )
+                                        {
+                                            // For PDF export of selected slides, PowerPoint handles this via selection
+                                            // Ensure the slides are actually selected in the UI for ExportAsFixedFormat to work correctly with ppPrintSelection
+                                            // It's generally better to rely on the user having them selected,
+                                            // but programmatically selecting them can be an option if needed, though it might change user's view.
+                                            // For simplicity, we assume they are already selected as per the radio button choice.
+                                            // If direct API for exporting a SlideRange to PDF existed, it would be cleaner.
+                                            // The most robust way for selected slides to PDF is to ensure they are selected, then use ppPrintSelection.
+                                            // PowerPoint's UI "Save As PDF" with "Options..." -> "Selection" does this.
+                                            // We will select them programmatically before export.
+                                            int[] slideIndices = new int[selectedSlideRange.Count];
+                                            for (int i = 0; i < selectedSlideRange.Count; i++)
+                                            {
+                                                slideIndices[i] = selectedSlideRange[
+                                                    i + 1
+                                                ].SlideIndex;
+                                            }
+                                            activePresentation.Slides.Range(slideIndices).Select();
+
+                                            activePresentation.ExportAsFixedFormat(
+                                                Path: exportPath,
+                                                FixedFormatType: PpFixedFormatType.ppFixedFormatTypePDF,
+                                                Intent: PpFixedFormatIntent.ppFixedFormatIntentPrint,
+                                                OutputType: PpPrintOutputType.ppPrintOutputSlides,
+                                                RangeType: PpPrintRangeType.ppPrintSelection // Export only the selected slides
+                                            );
+                                        }
+                                        else if (!exportCurrentSlide && !exportSelectedSlides) // All slides
+                                        {
+                                            activePresentation.ExportAsFixedFormat(
+                                                Path: exportPath,
+                                                FixedFormatType: PpFixedFormatType.ppFixedFormatTypePDF,
+                                                Intent: PpFixedFormatIntent.ppFixedFormatIntentPrint
+                                            ); // Defaults to all slides
+                                        }
+                                        else if (exportCurrentSlide && slideToExport == null)
+                                        {
+                                            MessageBox.Show(
+                                                "无法导出当前幻灯片为PDF，因为它未被正确识别。",
+                                                "导出错误",
+                                                MessageBoxButtons.OK,
+                                                MessageBoxIcon.Error
+                                            );
+                                            return;
+                                        }
+                                    }
+                                }
+                                else // Image formats
+                                {
+                                    int dpi = int.Parse(dpiCombo.SelectedItem.ToString());
+                                    if (exportCurrentSlide && slideToExport != null)
+                                    {
+                                        ExportSlide(slideToExport, exportPath, selectedFormat, dpi);
+                                    }
+                                    else if (
+                                        exportSelectedSlides
+                                        && selectedSlideRange != null
+                                        && selectedSlideRange.Count > 0
+                                    )
+                                    {
+                                        string outputFileNameBase =
+                                            Path.GetFileNameWithoutExtension(exportPath); // Base name from SaveDialog
+                                        if (selectedSlideRange.Count == 1)
+                                        {
+                                            ExportSlide(
+                                                selectedSlideRange[1],
+                                                exportPath,
+                                                selectedFormat,
+                                                dpi
+                                            );
+                                        }
+                                        else
+                                        {
+                                            for (int i = 1; i <= selectedSlideRange.Count; i++)
+                                            {
+                                                PowerPoint.Slide slide = selectedSlideRange[i];
+                                                // Use the slide's actual index for a more consistent naming if desired, or just a sequence number
+                                                string filename = Path.Combine(
+                                                    exportDirectory,
+                                                    $"{outputFileNameBase}{slide.SlideIndex}.{selectedFormat.ToLower()}"
+                                                );
+                                                ExportSlide(slide, filename, selectedFormat, dpi);
+                                                // No need to release com object for slide from SlideRange here as it's managed by the range
+                                            }
+                                        }
+                                    }
+                                    else if (!exportCurrentSlide && !exportSelectedSlides) // All slides
+                                    {
+                                        string outputFileNameBase =
+                                            Path.GetFileNameWithoutExtension(exportPath); // Base name from SaveDialog
+                                        for (int i = 1; i <= slides.Count; i++)
+                                        {
+                                            PowerPoint.Slide slide = slides[i];
+                                            string filename = Path.Combine(
+                                                exportDirectory,
+                                                $"{outputFileNameBase}{slide.SlideIndex}.{selectedFormat.ToLower()}"
+                                            );
+                                            ExportSlide(slide, filename, selectedFormat, dpi);
+                                            System.Runtime.InteropServices.Marshal.ReleaseComObject(
+                                                slide
+                                            );
+                                            slide = null;
+                                        }
+                                    }
+                                    else if (exportCurrentSlide && slideToExport == null)
+                                    {
+                                        MessageBox.Show(
+                                            "无法导出当前幻灯片，因为它未被正确识别。",
+                                            "导出错误",
+                                            MessageBoxButtons.OK,
+                                            MessageBoxIcon.Error
+                                        );
+                                        return;
+                                    }
+                                }
+
+                                MessageBox.Show(
+                                    "导出完成！",
+                                    "成功",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Information
+                                );
+                                // 根据复选框状态决定是否打开文件夹
+                                if (openFolderCheckBox.Checked)
+                                {
+                                    System.Diagnostics.Process.Start(
+                                        "explorer.exe",
+                                        exportDirectory
+                                    );
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                MessageBox.Show(
+                                    $"导出过程中发生错误：{ex.Message}",
+                                    "错误",
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Error
+                                );
+                            }
+                            finally
+                            {
+                                if (slideToExport != null)
+                                    System.Runtime.InteropServices.Marshal.ReleaseComObject(
+                                        slideToExport
+                                    );
+                                if (selectedSlideRange != null)
+                                    System.Runtime.InteropServices.Marshal.ReleaseComObject(
+                                        selectedSlideRange
+                                    );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private void ExportSlideAsPdf(
+            PowerPoint.Presentation presentation,
+            int slideIndex,
+            string filePath
+        )
+        {
+            PowerPoint.PrintRange printRange = null;
+            try
+            {
+                presentation.ExportAsFixedFormat(
+                    Path: filePath,
+                    FixedFormatType: PpFixedFormatType.ppFixedFormatTypePDF,
+                    Intent: PpFixedFormatIntent.ppFixedFormatIntentPrint,
+                    PrintRange: (printRange = presentation.PrintOptions.Ranges.Add(slideIndex, slideIndex))
+                );
+            }
+            finally
+            {
+                if (printRange != null)
+                {
+                    try { printRange.Delete(); } catch { }
+                    PowerPointContext.Release(printRange);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 复制选中图片的原始数据到剪贴板，以保证最高质量。
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        // 放在你的 Ribbon 类或者 ThisAddIn 类中
+        // 确保已经 using 了 System.Windows.Forms, System.IO, System.Drawing,
+        // PowerPoint = Microsoft.Office.Interop.PowerPoint, Office = Microsoft.Office.Core
+
+        private void CopyOriginalPicture_Click(object sender, Microsoft.Office.Tools.Ribbon.RibbonControlEventArgs e)
+        {
+            PowerPoint.Application app = Globals.ThisAddIn.Application;
+            PowerPoint.Selection sel = null;
+            PowerPoint.Shape selectedShape = null;
+
+            try
+            {
+                if (app.ActiveWindow == null || app.ActiveWindow.View == null) return;
+                sel = app.ActiveWindow.Selection;
+
+                // 1. 验证是否选择了单个图片
+                if (sel.Type != PowerPoint.PpSelectionType.ppSelectionShapes || sel.ShapeRange.Count != 1)
+                {
+                    MessageBox.Show("请选择单个图片对象。", "操作提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                selectedShape = sel.ShapeRange[1];
+
+                if (!IsPictureShape(selectedShape))
+                {
+                    MessageBox.Show("所选对象不是图片，请重新选择。", "操作提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // 2. 保存图片的原始状态（尺寸、位置和锁定设置）
+                float originalWidth = selectedShape.Width;
+                float originalHeight = selectedShape.Height;
+                float originalLeft = selectedShape.Left;
+                float originalTop = selectedShape.Top;
+                Office.MsoTriState originalLockAspectRatio = selectedShape.LockAspectRatio;
+
+                try
+                {
+                    // 3. 获取幻灯片的高度
+                    float slideHeight = app.ActivePresentation.PageSetup.SlideHeight;
+
+                    // 4. 临时修改图片尺寸
+                    // 确保锁定宽高比，以便在调整高度时宽度能按比例缩放
+                    selectedShape.LockAspectRatio = Office.MsoTriState.msoTrue;
+                    // 将图片高度设置为幻灯片的高度
+                    selectedShape.Height = slideHeight;
+
+                    // 5. 直接将当前状态的形状复制到剪贴板
+                    selectedShape.Copy();
+
+                    //MessageBox.Show("已成功将图片（按幻灯片高度缩放后）复制到剪贴板！", "复制成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"复制图片时出错: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    // 6. **关键步骤**: 无论成功或失败，都恢复图片的原始状态
+                    if (selectedShape != null)
+                    {
+                        try
+                        {
+                            // 按相反的顺序恢复，先恢复锁定状态，再恢复尺寸和位置
+                            selectedShape.LockAspectRatio = originalLockAspectRatio;
+                            selectedShape.Width = originalWidth;
+                            selectedShape.Height = originalHeight;
+                            selectedShape.Left = originalLeft;
+                            selectedShape.Top = originalTop;
+                        }
+                        catch (Exception restoreEx)
+                        {
+                            // 如果恢复失败，在调试时输出信息，通常不打扰用户
+                            System.Diagnostics.Debug.WriteLine($"恢复图片原始状态失败: {restoreEx.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception outerEx)
+            {
+                MessageBox.Show($"发生意外错误: {outerEx.Message}", "严重错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                // 7. 释放COM对象
+                if (selectedShape != null) Marshal.ReleaseComObject(selectedShape);
+                if (sel != null) Marshal.ReleaseComObject(sel);
+            }
+        }
+
+        private void ExportSlide(PowerPoint.Slide slide, string filename, string format, int dpi)
+        {
+            string upperFormat = format.ToUpper(); // Ensure consistent case for comparison
+            if (upperFormat == "SVG")
+            {
+                slide.Export(filename, "SVG");
+            }
+            else
+            {
+                float slideWidth = slide.Master.Width;
+                float slideHeight = slide.Master.Height;
+
+                // 计算导出尺寸
+                int exportWidth = (int)((slideWidth / 72.0f) * dpi);
+                int exportHeight = (int)((slideHeight / 72.0f) * dpi);
+
+                slide.Export(filename, format, exportWidth, exportHeight);
+            }
+        }
+
+
+        // Helper method to get the local OneDrive path
+        private string GetLocalOneDrivePath()
+        {
+            // Try environment variables first
+            string oneDrivePath = Environment.GetEnvironmentVariable("OneDrive");
+            if (!string.IsNullOrEmpty(oneDrivePath) && Directory.Exists(oneDrivePath))
+            {
+                return oneDrivePath;
+            }
+
+            // Try consumer OneDrive path
+            oneDrivePath = Environment.GetEnvironmentVariable("OneDriveConsumer");
+            if (!string.IsNullOrEmpty(oneDrivePath) && Directory.Exists(oneDrivePath))
+            {
+                return oneDrivePath;
+            }
+
+            // Try business OneDrive path
+            oneDrivePath = Environment.GetEnvironmentVariable("OneDriveCommercial");
+            if (!string.IsNullOrEmpty(oneDrivePath) && Directory.Exists(oneDrivePath))
+            {
+                return oneDrivePath;
+            }
+
+            // Fallback to registry lookup for OneDrive path
+            try
+            {
+                using (
+                    var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                        @"Software\Microsoft\OneDrive"
+                    )
+                )
+                {
+                    if (key != null)
+                    {
+                        oneDrivePath = key.GetValue("UserFolder") as string;
+                        if (!string.IsNullOrEmpty(oneDrivePath) && Directory.Exists(oneDrivePath))
+                        {
+                            return oneDrivePath;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"Error accessing registry for OneDrive path: {ex.Message}"
+                );
+            }
+
+            return null;
+        }
+        private void insertLatexSVG_Click(object sender, RibbonControlEventArgs e)
+        {
+            if (app == null)
+            {
+                app = Globals.ThisAddIn.Application;
+            }
+
+            if (app?.ActiveWindow == null || app.ActiveWindow.View == null)
+            {
+                MessageBox.Show("当前没有打开的演示文稿窗口。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            Slide currentSlide = null;
+            try
+            {
+                currentSlide = app.ActiveWindow.View.Slide;
+            }
+            catch (Exception)
+            {
+                // 如果无法获取当前幻灯片，则提示并返回
+            }
+
+            if (currentSlide == null)
+            {
+                MessageBox.Show("无法获取当前幻灯片，请确保已经打开并选中了幻灯片。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            using (Form inputDialog = new Form
+            {
+                Width = 520,
+                Height = 420,
+                Text = "输入 LaTeX 公式",
+                StartPosition = FormStartPosition.CenterScreen,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+            })
+            {
+                var infoLabel = new Label
+                {
+                    Text = "请输入 LaTeX 数学公式，不需要输入 $ 或 \\(...\\)。",
+                    Dock = DockStyle.Top,
+                    Height = 40,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Padding = new Padding(10, 10, 10, 0),
+                };
+
+                var latexInputBox = new TextBox
+                {
+                    Multiline = true,
+                    Dock = DockStyle.Fill,
+                    Font = new Font("Consolas", 12),
+                    ScrollBars = ScrollBars.Vertical,
+                };
+
+                var buttonPanel = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Bottom,
+                    Height = 50,
+                    Padding = new Padding(10),
+                    FlowDirection = FlowDirection.RightToLeft,
+                    AutoSize = false,
+                };
+
+                var okButton = new Button
+                {
+                    Text = "确定",
+                    DialogResult = DialogResult.OK,
+                    Width = 80,
+                    Height = 30,
+                    Margin = new Padding(10, 10, 0, 0),
+                };
+
+                var cancelButton = new Button
+                {
+                    Text = "取消",
+                    DialogResult = DialogResult.Cancel,
+                    Width = 80,
+                    Height = 30,
+                    Margin = new Padding(10, 10, 0, 0),
+                };
+
+                buttonPanel.Controls.Add(okButton);
+                buttonPanel.Controls.Add(cancelButton);
+
+                inputDialog.Controls.Add(latexInputBox);
+                inputDialog.Controls.Add(buttonPanel);
+                inputDialog.Controls.Add(infoLabel);
+
+                inputDialog.AcceptButton = okButton;
+                inputDialog.CancelButton = cancelButton;
+
+                if (inputDialog.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+
+                string latexInput = latexInputBox.Text?.Trim();
+                if (string.IsNullOrWhiteSpace(latexInput))
+                {
+                    return;
+                }
+
+                string normalizedLatex = NormalizeLatexInput(latexInput);
+
+                try
+                {
+                    var converter = Globals.ThisAddIn.LatexSvgConverter ?? new LatexToSvgConverter();
+                    string svgContent = converter.ConvertLatexToSvg(normalizedLatex);
+
+                    if (string.IsNullOrWhiteSpace(svgContent))
+                    {
+                        MessageBox.Show("未生成有效的 SVG 内容。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return;
+                    }
+
+                    string tempDirectory = Path.Combine(Path.GetTempPath(), "SlideSCI-Focus", "latex");
+                    Directory.CreateDirectory(tempDirectory);
+                    string tempFilePath = Path.Combine(tempDirectory, $"latex_{Guid.NewGuid():N}.svg");
+                    File.WriteAllText(tempFilePath, svgContent, Encoding.UTF8);
+
+                    try
+                    {
+                        Shape svgShape = currentSlide.Shapes.AddPicture(
+                            tempFilePath,
+                            Office.MsoTriState.msoFalse,
+                            Office.MsoTriState.msoTrue,
+                            0,
+                            0,
+                            -1,
+                            -1
+                        );
+
+                        if (svgShape != null)
+                        {
+                            svgShape.Left = (currentSlide.Master.Width - svgShape.Width) / 2;
+                            svgShape.Top = (currentSlide.Master.Height - svgShape.Height) / 2;
+                            svgShape.LockAspectRatio = Office.MsoTriState.msoTrue;
+                            svgShape.AlternativeText = $"{normalizedLatex}";
+                            // svgShape 默认设置为2x大小
+                            svgShape.Width *= 2;
+                            svgShape.Select();
+                        }
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            if (File.Exists(tempFilePath))
+                            {
+                                File.Delete(tempFilePath);
+                            }
+                        }
+                        catch (Exception deleteEx)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"删除临时 SVG 文件失败: {deleteEx.Message}");
+                        }
+                    }
+                }
+                catch (FileNotFoundException fnfEx)
+                {
+                    MessageBox.Show(
+                        $"{fnfEx.Message}\n请在插件目录下的 latex-converter 文件夹中执行 npm install。",
+                        "脚本缺失",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                }
+                catch (InvalidOperationException invalidOpEx)
+                {
+                    MessageBox.Show(
+                        invalidOpEx.Message,
+                        "LaTeX 转换失败",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        $"插入 LaTeX SVG 时发生错误: {ex.Message}",
+                        "错误",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                }
+            }
+        }
+
+        private static string NormalizeLatexInput(string latexInput)
+        {
+            string trimmed = latexInput.Trim();
+
+            if (trimmed.StartsWith("$$") && trimmed.EndsWith("$$"))
+            {
+                trimmed = trimmed.Substring(2, trimmed.Length - 4);
+            }
+            else if (trimmed.StartsWith("$") && trimmed.EndsWith("$"))
+            {
+                trimmed = trimmed.Substring(1, trimmed.Length - 2);
+            }
+            else if (trimmed.StartsWith(@"\(") && trimmed.EndsWith(@"\)"))
+            {
+                trimmed = trimmed.Substring(2, trimmed.Length - 4);
+            }
+            else if (trimmed.StartsWith(@"\[") && trimmed.EndsWith(@"\]"))
+            {
+                trimmed = trimmed.Substring(2, trimmed.Length - 4);
+            }
+
+            return trimmed.Replace("\r", "").Trim();
+        }
+        private void updateLabelsButton_Click(object sender, RibbonControlEventArgs e)
+        {
+            Selection sel = app.ActiveWindow.Selection;
+            if (sel.Type != PpSelectionType.ppSelectionShapes || sel.ShapeRange.Count == 0)
+            {
+                MessageBox.Show("请选择要更新标签的文本框。");
+                return;
+            }
+
+            string fontFamily = labelFontNameEditBox.Text;
+            float fontSize;
+            if (!float.TryParse(labelFontSizeEditBox.Text, out fontSize))
+            {
+                MessageBox.Show("请输入有效的字体大小。");
+                return;
+            }
+
+            string labelTemplate = labelTemplateComboBox.Text;
+
+            var templates = new Dictionary<string, string>
+            {
+                { "A", "ABCDEFGHIJKLMNOPQRSTUVWXYZ" },
+                { "a", "abcdefghijklmnopqrstuvwxyz" },
+                { "A)", "ABCDEFGHIJKLMNOPQRSTUVWXYZ" },
+                { "a)", "abcdefghijklmnopqrstuvwxyz" },
+                { "(A)", "ABCDEFGHIJKLMNOPQRSTUVWXYZ" },
+                { "(a)", "abcdefghijklmnopqrstuvwxyz" },
+                { "1", "123456789" }, 
+                { "1)", "123456789" }, 
+                { "Ⅰ", "ⅠⅡⅢⅣⅤⅥⅦⅦⅨⅩ" },
+                { "Ⅰ)", "ⅠⅡⅢⅣⅤⅥⅦⅦⅨⅩ" },
+                { "①", "①②③④⑤⑥⑦⑧⑨⑩" },
+                { "①)", "①②③④⑤⑥⑦⑧⑨⑩" },
+                { "一", "一二三四五六七八九十" },
+                { "一)", "一二三四五六七八九十" },
+            };
+
+            if (!templates.ContainsKey(labelTemplate))
+            {
+                labelTemplate = "A";
+            }
+
+            string labels = templates[labelTemplate];
+            bool isNumeric = labelTemplate.StartsWith("1");
+
+            // 获取起始编号
+            int startIndex = 1;
+            if (!string.IsNullOrEmpty(labelIndex.Text) && !int.TryParse(labelIndex.Text, out startIndex))
+            {
+                MessageBox.Show("请输入有效的起始编号。");
+                return;
+            }
+
+            // 过滤出文本框
+            var textBoxes = new List<Shape>();
+            foreach (Shape shape in sel.ShapeRange)
+            {
+                if (shape.Type == Office.MsoShapeType.msoTextBox)
+                {
+                    textBoxes.Add(shape);
+                }
+            }
+
+            if (textBoxes.Count == 0)
+            {
+                MessageBox.Show("请选择要更新标签的文本框。");
+                return;
+            }
+
+            // 对文本框进行排序（按位置）
+            var groups = new List<ImageGroup>();
+            foreach (var textBox in textBoxes)
+            {
+                bool addedToExistingGroup = false;
+                foreach (var group in groups)
+                {
+                    if (group.OverlapsWith(textBox))
+                    {
+                        group.AddShape(textBox);
+                        addedToExistingGroup = true;
+                        break;
+                    }
+                }
+
+                if (!addedToExistingGroup)
+                {
+                    var newGroup = new ImageGroup();
+                    newGroup.AddShape(textBox);
+                    groups.Add(newGroup);
+                }
+            }
+
+            // Sort shapes within each group by x position
+            foreach (var group in groups)
+            {
+                group.Shapes.Sort((a, b) => a.Left.CompareTo(b.Left));
+            }
+
+            // Sort groups by MinTop
+            groups.Sort((a, b) => a.MinTop.CompareTo(b.MinTop));
+
+            // Create flattened list of sorted shapes
+            var sortedTextBoxes = new List<Shape>();
+            foreach (var group in groups)
+            {
+                sortedTextBoxes.AddRange(group.Shapes);
+            }
+
+            // 更新文本框的标签
+            for (int i = 0; i < sortedTextBoxes.Count; i++)
+            {
+                try
+                {
+                    var textBox = sortedTextBoxes[i];
+                    string label;
+                    if (isNumeric)
+                    {
+                        label = (startIndex + i).ToString();
+                    }
+                    else
+                    {
+                        int labelIndexValue = (startIndex - 1 + i) % labels.Length;
+                        label = labels[labelIndexValue].ToString();
+                    }
+
+                    if (labelTemplate.EndsWith(")") && !labelTemplate.StartsWith("("))
+                    {
+                        label += ")";
+                    }
+                    else if (labelTemplate.StartsWith("(") && labelTemplate.EndsWith(")"))
+                    {
+                        label = "(" + label + ")";
+                    }
+
+                    // 更新文本框内容和字体设置
+                    textBox.TextFrame.TextRange.Text = label;
+                    textBox.TextFrame.TextRange.Font.Size = fontSize;
+                    textBox.TextFrame.TextRange.Font.NameFarEast = fontFamily;
+                    textBox.TextFrame.TextRange.Font.Name = fontFamily;
+                    
+                    // 应用加粗设置
+                    if (labelBoldcheckBox.Checked)
+                    {
+                        textBox.TextFrame.TextRange.Font.Bold = Office.MsoTriState.msoTrue;
+                    }
+                    else
+                    {
+                        textBox.TextFrame.TextRange.Font.Bold = Office.MsoTriState.msoFalse;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"更新标签时出错: {ex.Message}");
+                }
+            }
+
+            // 如果开启了编号自动更新，则更新起始编号
+            if (labelIndexUpdatecheckBox.Checked)
+            {
+                int nextIndex = startIndex + sortedTextBoxes.Count;
+                labelIndex.Text = nextIndex.ToString();
+            }
+        }
+
+        /// <summary>步骤一：在选中的图片中心放置可自由拖动的方形选区框。</summary>
+        private void btnInsertZoomBox_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                if (!TryGetActiveSlide(out Slide slide))
+                {
+                    MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!PowerPointContext.TryGetActiveSelection(app, out Selection sel)
+                    || sel.Type != PpSelectionType.ppSelectionShapes
+                    || sel.ShapeRange.Count != 1)
+                {
+                    MessageBox.Show("请只选中一张要添加局部放大的图片。", "局部放大",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                Shape picture = sel.ShapeRange[1];
+                if (!IsPictureShape(picture))
+                {
+                    MessageBox.Show("请先选中一张图片（当前选中对象不是图片）。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!TryParseFloat(zoomBoxPercentCombo.Text, out float percent) || percent <= 0)
+                {
+                    percent = 40f;
+                }
+                percent = Math.Max(5f, Math.Min(90f, percent));
+
+                try { app.StartNewUndoEntry(); } catch { }
+                Shape box = ZoomInsetHelper.InsertZoomBox(slide, picture, percent);
+                SelectMultipleShapes(new List<Shape> { box });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"插入选区框失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 步骤二：生成放大图。
+        /// 单击 = 按上次保存的设置直接生成/更新当前选区（首次使用时自动打开设置）；
+        /// Ctrl+单击 = 打开「局部放大设置」对话框，调整后生成并记住设置。
+        /// </summary>
+        private void btnGenerateZoomInset_Click(object sender, RibbonControlEventArgs e)
+        {
+            try
+            {
+                bool openSettings = (Control.ModifierKeys & Keys.Control) != 0;
+
+                if (!TryGetActiveSlide(out Slide slide))
+                {
+                    MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                PowerPointContext.TryGetActiveSelection(app, out Selection selection);
+                if (!ZoomInsetHelper.TryResolveZoomBox(slide, selection, out Shape box, out string resolveError))
+                {
+                    MessageBox.Show(resolveError, "局部放大",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                Shape picture = ZoomInsetHelper.FindSourcePicture(slide, box);
+                if (picture == null)
+                {
+                    MessageBox.Show("未找到与选区框对应的原图（原图可能已被删除）。请重新插入选区框。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                ZoomSettings settings = ZoomSettings.LoadOrDefault();
+                if (openSettings || !ZoomSettings.HasSavedSettings())
+                {
+                    using (var dialog = new ZoomInsetForm(box.Width, box.Height, picture.Width, picture.Height, settings))
+                    {
+                        IWin32Window owner = PowerPointContext.GetDialogOwner(app);
+                        DialogResult dialogResult = owner == null
+                            ? dialog.ShowDialog()
+                            : dialog.ShowDialog(owner);
+                        if (dialogResult != DialogResult.OK) return;
+
+                        settings = new ZoomSettings
+                        {
+                            TargetMode = dialog.TargetMode,
+                            Magnification = dialog.Magnification,
+                            CustomWidthCm = dialog.CustomWidthCm,
+                            GapCm = dialog.GapCm,
+                            LineStyle = dialog.LineStyle,
+                            LineWeight = dialog.LineWeight,
+                            BoxLineWeight = dialog.BoxLineWeight,
+                            LineColorRgb = dialog.LineColorRgb,
+                            BoxColorRgb = dialog.BoxColorRgb,
+                            LineDash = dialog.LineDashStyle == Office.MsoLineDashStyle.msoLineDash ? 1 : 0,
+                            Group = dialog.GroupEnabled
+                        };
+                        ZoomSettings.Save(settings);
+                    }
+                }
+
+                try { app.StartNewUndoEntry(); } catch { }
+                ZoomInsetResult result = ApplyZoomSettings(slide, box, picture, settings, app);
+
+                if (!result.Ok)
+                {
+                    MessageBox.Show(result.Error ?? "生成失败。", "局部放大",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else if (!string.IsNullOrWhiteSpace(result.Warning))
+                {
+                    MessageBox.Show(result.Warning, "局部放大已生成",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"生成放大图失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>按已保存设置计算目标尺寸并生成放大图。</summary>
+        private static ZoomInsetResult ApplyZoomSettings(Slide slide, Shape box, Shape picture,
+            ZoomSettings settings, PowerPoint.Application app)
+        {
+            ZoomInsetHelper.ComputeTargetSize(picture, box, settings.TargetMode,
+                settings.Magnification, settings.CustomWidthCm,
+                out float targetWidth, out float targetHeight);
+
+            return ZoomInsetHelper.GenerateZoomInset(
+                slide, box, picture,
+                targetWidth, targetHeight,
+                ZoomInsetHelper.CmToPoints(settings.GapCm),
+                settings.LineStyle,
+                settings.LineWeight,
+                settings.BoxLineWeight,
+                settings.LineColorRgb,
+                settings.BoxColorRgb,
+                settings.LineDash == 1 ? Office.MsoLineDashStyle.msoLineDash : Office.MsoLineDashStyle.msoLineSolid,
+                settings.Group,
+                app);
+        }
+    }
+}
