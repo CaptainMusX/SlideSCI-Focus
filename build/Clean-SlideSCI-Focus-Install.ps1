@@ -10,6 +10,9 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot ".." )).Path
 $artifactRoot = Join-Path $repoRoot "artifacts"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+# Only clean this fork's current and earlier CaptainMusX identities. The
+# upstream Achuan-2.SlideSCI/SlideSCI installation is deliberately preserved.
+$ownedIdentityPattern = '(?i)captainmusx\.slidesci(?:\.focus)?|slidesci[\s._-]+focus'
 
 function Test-PathUnderRoot
 {
@@ -52,7 +55,7 @@ function Get-RegistryInventory
             $properties = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
             $manifestProperty = $properties.PSObject.Properties['Manifest']
             $manifestValue = if ($manifestProperty) { [string]$manifestProperty.Value } else { '' }
-            if ($key.PSChildName -notmatch '(?i)slidesci' -and $manifestValue -notmatch '(?i)slidesci|achuan-2')
+            if ($key.PSChildName -notmatch $ownedIdentityPattern -and $manifestValue -notmatch $ownedIdentityPattern)
             {
                 continue
             }
@@ -96,7 +99,7 @@ function Get-ClickOnceBranches
         {
             continue
         }
-        if ($content -notmatch '(?i)SlideSCI|Achuan-2') { continue }
+        if ($content -notmatch $ownedIdentityPattern) { continue }
 
         $relativePath = $candidateFile.FullName.Substring($ClickOnceRoot.Length).TrimStart('\', '/')
         $parts = $relativePath -split '[\\/]'
@@ -123,7 +126,7 @@ function Get-UninstallInventory
             $uninstallProperty = $properties.PSObject.Properties['UninstallString']
             $displayName = if ($displayProperty) { [string]$displayProperty.Value } else { '' }
             $uninstallString = if ($uninstallProperty) { [string]$uninstallProperty.Value } else { '' }
-            if ($displayName -notmatch '(?i)slidesci' -and $uninstallString -notmatch '(?i)slidesci')
+            if ($displayName -notmatch $ownedIdentityPattern -and $uninstallString -notmatch $ownedIdentityPattern)
             {
                 continue
             }
@@ -150,7 +153,7 @@ function Get-VstoRegistryInventory
             $properties = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
             $urlProperty = $properties.PSObject.Properties['Url']
             $url = if ($urlProperty) { [string]$urlProperty.Value } else { '' }
-            if ($url -notmatch '(?i)slidesci|achuan-2') { continue }
+            if ($url -notmatch $ownedIdentityPattern) { continue }
             $records += [pscustomobject]@{
                 Path = $key.PSPath
                 Root = $inclusionRoot
@@ -167,7 +170,7 @@ function Get-VstoRegistryInventory
         $metadataProperties = Get-ItemProperty -LiteralPath $metadataRoot -ErrorAction SilentlyContinue
         foreach ($property in $metadataProperties.PSObject.Properties)
         {
-            if ($property.Name -notmatch '^PS' -and $property.Name -match '(?i)slidesci|achuan-2')
+            if ($property.Name -notmatch '^PS' -and $property.Name -match $ownedIdentityPattern)
             {
                 $records += [pscustomobject]@{
                     Path = $metadataRoot
@@ -188,7 +191,7 @@ function Get-VstoRegistryInventory
             foreach ($propertyName in @('addInName', 'friendlyName', 'description'))
             {
                 $property = $properties.PSObject.Properties[$propertyName]
-                if ($property -and [string]$property.Value -match '(?i)^slidesci$') { $matched = $true }
+                if ($property -and [string]$property.Value -match $ownedIdentityPattern) { $matched = $true }
             }
             if (-not $matched) { continue }
             $records += [pscustomobject]@{
@@ -209,7 +212,7 @@ function Get-VstoRegistryInventory
             $properties = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
             $solutionText = (($properties.PSObject.Properties | Where-Object Name -notmatch '^PS' |
                 ForEach-Object { [string]$_.Name + ' ' + [string]$_.Value }) -join ' ')
-            if ($solutionText -notmatch '(?i)slidesci|achuan-2') { continue }
+            if ($solutionText -notmatch $ownedIdentityPattern) { continue }
             $records += [pscustomobject]@{
                 Path = $key.PSPath
                 Root = $vstaSolutionsRoot
@@ -228,7 +231,7 @@ function Get-VstoRegistryInventory
         if (-not (Test-Path -LiteralPath $addinsDataRoot)) { continue }
         foreach ($key in (Get-ChildItem -LiteralPath $addinsDataRoot -ErrorAction SilentlyContinue))
         {
-            if ($key.PSChildName -notmatch '(?i)^(?:(?:achuan-2|captainmusx)\.)?slidesci$') { continue }
+            if ($key.PSChildName -notmatch $ownedIdentityPattern) { continue }
             $records += [pscustomobject]@{
                 Path = $key.PSPath
                 Root = $addinsDataRoot
@@ -248,7 +251,7 @@ function Get-VstoRegistryInventory
         $properties = Get-ItemProperty -LiteralPath $officeValueRoot -ErrorAction SilentlyContinue
         foreach ($property in $properties.PSObject.Properties)
         {
-            if ($property.Name -match '^PS' -or $property.Name -notmatch '(?i)(?:^|\.)slidesci(?:\.|$)') { continue }
+            if ($property.Name -match '^PS' -or $property.Name -notmatch $ownedIdentityPattern) { continue }
             $records += [pscustomobject]@{
                 Path = $officeValueRoot
                 Root = $officeValueRoot
@@ -271,7 +274,7 @@ function Get-ClickOnceRegistryInventory
     $baseRoot = 'Registry::HKEY_CURRENT_USER\Software\Classes\Software\Microsoft\Windows\CurrentVersion\Deployment\SideBySide\2.0'
     if (-not (Test-Path -LiteralPath $baseRoot)) { return @() }
 
-    $identityPattern = '(?i)slidesci|achuan-2|dd98b777c4d5db1c|a261b77ce4890927|bbe7f681783fffde|7107410258dd8538'
+    $identityPattern = $ownedIdentityPattern
     $keys = @((Get-Item -LiteralPath $baseRoot)) +
         @(Get-ChildItem -LiteralPath $baseRoot -Recurse -ErrorAction SilentlyContinue)
 
@@ -354,21 +357,22 @@ foreach ($manifestFile in $manifestFiles)
     {
         continue
     }
-    if ([System.IO.Path]::GetFileName($manifestFile) -match '(?i)^(?:CaptainMusX\.)?SlideSCI\.vsto$')
+    if ([System.IO.Path]::GetFileName($manifestFile) -match '(?i)^CaptainMusX\.SlideSCI(?:\.Focus)?\.vsto$')
     {
         $externalManifestPaths += $manifestFile
     }
 }
 
 $knownExternalManifestPaths = @(
+    'C:\Program Files\CaptainMusX.SlideSCI.Focus.vsto',
+    'C:\Program Files (x86)\CaptainMusX.SlideSCI.Focus.vsto',
+    'D:\Program Files\CaptainMusX.SlideSCI.Focus.vsto',
+    'D:\Program Files (x86)\CaptainMusX.SlideSCI.Focus.vsto',
     'C:\Program Files\CaptainMusX.SlideSCI.vsto',
     'C:\Program Files (x86)\CaptainMusX.SlideSCI.vsto',
     'D:\Program Files\CaptainMusX.SlideSCI.vsto',
     'D:\Program Files (x86)\CaptainMusX.SlideSCI.vsto',
-    'C:\Program Files\SlideSCI.vsto',
-    'C:\Program Files (x86)\SlideSCI.vsto',
-    'D:\Program Files\SlideSCI.vsto',
-    'D:\Program Files (x86)\SlideSCI.vsto'
+    (Join-Path $env:LOCALAPPDATA 'Programs\SlideSCI Focus\CaptainMusX.SlideSCI.Focus.vsto')
 )
 foreach ($knownPath in $knownExternalManifestPaths)
 {
@@ -379,10 +383,11 @@ foreach ($knownPath in $knownExternalManifestPaths)
 }
 
 $knownExternalDirectories = @(
-    'C:\Program Files\SlideSCI',
-    'C:\Program Files (x86)\SlideSCI',
-    'D:\Program Files\SlideSCI',
-    'D:\Program Files (x86)\SlideSCI',
+    'C:\Program Files\SlideSCI Focus',
+    'C:\Program Files (x86)\SlideSCI Focus',
+    'D:\Program Files\SlideSCI Focus',
+    'D:\Program Files (x86)\SlideSCI Focus',
+    (Join-Path $env:LOCALAPPDATA 'Programs\SlideSCI Focus'),
     'F:\SlideSCI-Installed'
 )
 $externalDirectories = @($knownExternalDirectories | Where-Object { Test-Path -LiteralPath $_ -PathType Container })
@@ -557,7 +562,7 @@ foreach ($failure in $failures) { $actions.Add($failure) }
 $actions
 if ($failures.Count -gt 0)
 {
-    throw "SlideSCI 清理未完全成功；详情见 $logPath"
+    throw "SlideSCI Focus 清理未完全成功；详情见 $logPath"
 }
 
 [pscustomobject]@{

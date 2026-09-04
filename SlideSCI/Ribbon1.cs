@@ -3231,13 +3231,13 @@ namespace SlideSCI
 
         private void openGithub_Click(object sender, RibbonControlEventArgs e)
         {
-            System.Diagnostics.Process.Start("https://github.com/Achuan-2/SlideSCI/");
+            System.Diagnostics.Process.Start("https://github.com/CaptainMusX/SlideSCI-Focus/");
         }
 
         private void openDoc_Click(object sender, RibbonControlEventArgs e)
         {
             System.Diagnostics.Process.Start(
-                "https://www.yuque.com/achuan-2/blog/etzcergpmb4rr2sk/"
+                "https://github.com/CaptainMusX/SlideSCI-Focus#readme"
             );
         }
 
@@ -3251,8 +3251,8 @@ namespace SlideSCI
         private void aboutDeveloper_Click(object sender, RibbonControlEventArgs e)
         {
             MessageBox.Show(
-                "开发者: Achuan-2\n邮箱: achuan-2@outlook.com\nGithub地址：https://github.com/Achuan-2",
-                "关于开发者"
+                "开发者: CaptainMusX\n项目: SlideSCI Focus\n基于 Achuan-2/SlideSCI 修改（AGPL-3.0）\nGithub地址：https://github.com/CaptainMusX/SlideSCI-Focus",
+                "关于 SlideSCI Focus"
             );
         }
 
@@ -4845,12 +4845,12 @@ namespace SlideSCI
 
         private void donate(object sender, RibbonControlEventArgs e)
         {
-            System.Diagnostics.Process.Start("https://fastly.jsdelivr.net/gh/Achuan-2/PicBed/assets/20241128221208-2024-11-28.png");
+            System.Diagnostics.Process.Start("https://github.com/CaptainMusX/SlideSCI-Focus");
         }
 
         private void developer_website(object sender, RibbonControlEventArgs e)
         {
-            System.Diagnostics.Process.Start("https://www.github.com/achuan-2");
+            System.Diagnostics.Process.Start("https://github.com/CaptainMusX");
         }
         public void ExportOriginalImage_Click(object sender, RibbonControlEventArgs e)
         {
@@ -6022,7 +6022,7 @@ namespace SlideSCI
                         return;
                     }
 
-                    string tempDirectory = Path.Combine(Path.GetTempPath(), "SlideSCI", "latex");
+                    string tempDirectory = Path.Combine(Path.GetTempPath(), "SlideSCI-Focus", "latex");
                     Directory.CreateDirectory(tempDirectory);
                     string tempFilePath = Path.Combine(tempDirectory, $"latex_{Guid.NewGuid():N}.svg");
                     File.WriteAllText(tempFilePath, svgContent, Encoding.UTF8);

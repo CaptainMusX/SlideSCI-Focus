@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot ".." )).Path
-$issPath = Join-Path $repoRoot "build\SlideSCI.iss"
+$issPath = Join-Path $repoRoot "build\SlideSCI-Focus.iss"
 $artifactRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "artifacts"))
 $projectPath = Join-Path $repoRoot "SlideSCI\SlideSCI.csproj"
 
@@ -125,13 +125,13 @@ foreach ($sourceFile in $sourceFiles)
     Copy-Item -LiteralPath $sourceFile.FullName -Destination $destination -Force
 }
 
-$certificatePath = Join-Path $env:LOCALAPPDATA 'SlideSCI\build-signing\SlideSCI-Build-Signing.cer'
+$certificatePath = Join-Path $env:LOCALAPPDATA 'SlideSCI-Focus\build-signing\SlideSCI-Focus-Build-Signing.cer'
 if (Test-Path -LiteralPath $certificatePath -PathType Leaf)
 {
-    Copy-Item -LiteralPath $certificatePath -Destination (Join-Path $stagingPath 'SlideSCI-Build-Signing.cer') -Force
+    Copy-Item -LiteralPath $certificatePath -Destination (Join-Path $stagingPath 'SlideSCI-Focus-Build-Signing.cer') -Force
 }
 
-foreach ($requiredName in @('CaptainMusX.SlideSCI.vsto', 'CaptainMusX.SlideSCI.dll.manifest', 'CaptainMusX.SlideSCI.dll', 'latex-converter\latex-to-svg.js', 'latex-converter\package.json'))
+foreach ($requiredName in @('CaptainMusX.SlideSCI.Focus.vsto', 'CaptainMusX.SlideSCI.Focus.dll.manifest', 'CaptainMusX.SlideSCI.Focus.dll', 'latex-converter\latex-to-svg.js', 'latex-converter\package.json'))
 {
     $requiredPath = Join-Path $stagingPath $requiredName
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf))
@@ -140,7 +140,7 @@ foreach ($requiredName in @('CaptainMusX.SlideSCI.vsto', 'CaptainMusX.SlideSCI.d
     }
 }
 
-$applicationManifestPath = Join-Path $stagingPath 'CaptainMusX.SlideSCI.dll.manifest'
+$applicationManifestPath = Join-Path $stagingPath 'CaptainMusX.SlideSCI.Focus.dll.manifest'
 [xml]$applicationManifest = Get-Content -LiteralPath $applicationManifestPath -Raw
 $rsaKeyNode = $applicationManifest.SelectSingleNode('//*[local-name()="RSAKeyValue"]')
 if (-not $rsaKeyNode)
@@ -196,9 +196,9 @@ New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
 
 $isccPath = Find-InnoCompiler
 $signToolPath = Find-SignTool
-$pfxPath = Join-Path $env:LOCALAPPDATA 'SlideSCI\build-signing\SlideSCI-Build-Signing.pfx'
+$pfxPath = Join-Path $env:LOCALAPPDATA 'SlideSCI-Focus\build-signing\SlideSCI-Focus-Build-Signing.pfx'
 $logPath = Join-Path $outputPath 'inno-build.log'
-$setupPath = Join-Path $outputPath ("SlideSCI-{0}-Setup.exe" -f $appVersion)
+$setupPath = Join-Path $outputPath ("SlideSCI-Focus-{0}-Setup.exe" -f $appVersion)
 
 $isccArguments = @(
     "/DAppVersion=$appVersion",

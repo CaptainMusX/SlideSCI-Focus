@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot ".." )).Path
-$solutionPath = Join-Path $repoRoot "SlideSCI.sln"
+$solutionPath = Join-Path $repoRoot "SlideSCI-Focus.sln"
 $latexDirectory = Join-Path $repoRoot "SlideSCI\latex-converter"
 $artifactRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "artifacts"))
 $artifactRootWithSeparator = $artifactRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
@@ -23,7 +23,7 @@ $publishVersion = if ($versionNode -and $versionNode.InnerText) { $versionNode.I
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory))
 {
-    $OutputDirectory = Join-Path $artifactRoot "SlideSCI-$publishVersion"
+    $OutputDirectory = Join-Path $artifactRoot "SlideSCI-Focus-$publishVersion"
 }
 
 $outputPath = [System.IO.Path]::GetFullPath($OutputDirectory)
@@ -121,13 +121,13 @@ function Find-StrongNameTool
 
 function Ensure-LocalSigningMaterial
 {
-    $signingDirectory = Join-Path $env:LOCALAPPDATA "SlideSCI\build-signing"
+    $signingDirectory = Join-Path $env:LOCALAPPDATA "SlideSCI-Focus\build-signing"
     New-Item -ItemType Directory -Force -Path $signingDirectory | Out-Null
 
     # Keep the direct-deployment channel on its own stable manifest identity.
     # Reusing the certificate from the earlier ClickOnce wrapper makes VSTO
     # reuse that subscription's original deployment URL (for example D:\...).
-    $certificateSubject = "CN=SlideSCI Direct Deployment Signing"
+    $certificateSubject = "CN=SlideSCI Focus Direct Deployment Signing"
     $certificate = Get-ChildItem Cert:\CurrentUser\My |
         Where-Object { $_.Subject -eq $certificateSubject -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(30) } |
         Sort-Object NotAfter -Descending |
@@ -138,7 +138,7 @@ function Ensure-LocalSigningMaterial
         $certificate = New-SelfSignedCertificate `
             -Type CodeSigningCert `
             -Subject $certificateSubject `
-            -FriendlyName "SlideSCI Direct Deployment Signing" `
+            -FriendlyName "SlideSCI Focus Direct Deployment Signing" `
             -CertStoreLocation Cert:\CurrentUser\My `
             -KeyExportPolicy Exportable `
             -KeyLength 2048 `
@@ -148,8 +148,8 @@ function Ensure-LocalSigningMaterial
             -NotAfter (Get-Date).AddYears(2)
     }
 
-    $pfxPath = Join-Path $signingDirectory "SlideSCI-Build-Signing.pfx"
-    $certificatePath = Join-Path $signingDirectory "SlideSCI-Build-Signing.cer"
+    $pfxPath = Join-Path $signingDirectory "SlideSCI-Focus-Build-Signing.pfx"
+    $certificatePath = Join-Path $signingDirectory "SlideSCI-Focus-Build-Signing.cer"
     $certutilPath = Get-RequiredCommandPath "certutil.exe"
     & $certutilPath -exportPFX -user -f -p "" My $certificate.Thumbprint $pfxPath | Out-Null
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $pfxPath -PathType Leaf))
@@ -172,7 +172,7 @@ $npmPath = Get-RequiredCommandPath "npm"
 $msbuild = Find-MSBuild
 $snPath = Find-StrongNameTool
 $signing = Ensure-LocalSigningMaterial
-$snkPath = Join-Path (Split-Path $signing.PfxPath -Parent) "SlideSCI-Build-Assembly.snk"
+$snkPath = Join-Path (Split-Path $signing.PfxPath -Parent) "SlideSCI-Focus-Build-Assembly.snk"
 
 if (-not (Test-Path -LiteralPath (Join-Path $latexDirectory "node_modules\mathjax-full") -PathType Container))
 {
@@ -219,10 +219,10 @@ $msbuildArguments = @(
     "/p:VSToolsPath=$($msbuild.VSToolsPath)",
     "/p:PublishDir=$publishDirectoryWithSlash",
     "/p:PublishUrl=$publishDirectoryWithSlash",
-    "/p:SlideSCIBundleLatexRuntime=$bundleLatexRuntimeValue",
-    "/p:SlideSCIManifestKeyFile=$($signing.PfxPath)",
-    "/p:SlideSCIAssemblyKeyFile=$snkPath",
-    "/p:SlideSCIManifestCertificateThumbprint=$($signing.Thumbprint)",
+    "/p:SlideSCIFocusBundleLatexRuntime=$bundleLatexRuntimeValue",
+    "/p:SlideSCIFocusManifestKeyFile=$($signing.PfxPath)",
+    "/p:SlideSCIFocusAssemblyKeyFile=$snkPath",
+    "/p:SlideSCIFocusManifestCertificateThumbprint=$($signing.Thumbprint)",
     "/p:SignManifests=true",
     "/p:SignAssembly=true",
     "/m",
@@ -246,16 +246,16 @@ finally
 }
 
 $installerPath = Join-Path $outputPath "setup.exe"
-$deploymentManifestPath = Join-Path $outputPath "CaptainMusX.SlideSCI.vsto"
+$deploymentManifestPath = Join-Path $outputPath "CaptainMusX.SlideSCI.Focus.vsto"
 $applicationFilesDirectory = Join-Path $outputPath "Application Files"
-$publishedCertificatePath = Join-Path $outputPath "SlideSCI-Build-Signing.cer"
+$publishedCertificatePath = Join-Path $outputPath "SlideSCI-Focus-Build-Signing.cer"
 $signing.CertificatePath | Copy-Item -Destination $publishedCertificatePath -Force
 $hasInstaller = Test-Path -LiteralPath $installerPath -PathType Leaf
 $hasDeploymentManifest = Test-Path -LiteralPath $deploymentManifestPath -PathType Leaf
 $hasApplicationFiles = Test-Path -LiteralPath $applicationFilesDirectory -PathType Container
 if (-not $hasInstaller -or -not $hasDeploymentManifest -or -not $hasApplicationFiles)
 {
-    throw "发布完成但未找到完整的 setup.exe / CaptainMusX.SlideSCI.vsto / Application Files。"
+    throw "发布完成但未找到完整的 setup.exe / CaptainMusX.SlideSCI.Focus.vsto / Application Files。"
 }
 
 $publishedApplicationDirectory = Get-ChildItem -LiteralPath $applicationFilesDirectory -Directory | Select-Object -First 1

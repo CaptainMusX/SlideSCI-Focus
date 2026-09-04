@@ -6,7 +6,7 @@ namespace SlideSCI
 {
     /// <summary>
     /// 「局部放大」的持久化设置。
-    /// 保存于 %APPDATA%\SlideSCI\zoom_settings.xml，供「生成放大图」单击直出时复用。
+    /// 保存于 %APPDATA%\SlideSCI Focus\zoom_settings.xml，供「生成放大图」单击直出时复用。
     /// </summary>
     public class ZoomSettings
     {
@@ -30,27 +30,32 @@ namespace SlideSCI
         /// <summary>读取设置；文件不存在时返回默认值。</summary>
         public static ZoomSettings LoadOrDefault()
         {
-            try
+            // Read the new location first. The old location is intentionally
+            // retained as a read-only migration source for earlier releases.
+            foreach (string path in new[] { GetConfigPath(), GetLegacyConfigPath() })
             {
-                string path = GetConfigPath();
-                if (!File.Exists(path)) return CreateDefault();
-                using (var reader = new StreamReader(path))
+                if (!File.Exists(path)) continue;
+                try
                 {
-                    var serializer = new XmlSerializer(typeof(ZoomSettings));
-                    var loaded = serializer.Deserialize(reader) as ZoomSettings;
-                    return loaded ?? CreateDefault();
+                    using (var reader = new StreamReader(path))
+                    {
+                        var serializer = new XmlSerializer(typeof(ZoomSettings));
+                        var loaded = serializer.Deserialize(reader) as ZoomSettings;
+                        if (loaded != null) return loaded;
+                    }
+                }
+                catch
+                {
+                    // Try the next location, then fall back to defaults.
                 }
             }
-            catch
-            {
-                return CreateDefault();
-            }
+            return CreateDefault();
         }
 
         /// <summary>是否已存在已保存的设置（用于决定首次单击是否先弹设置）。</summary>
         public static bool HasSavedSettings()
         {
-            return File.Exists(GetConfigPath());
+            return File.Exists(GetConfigPath()) || File.Exists(GetLegacyConfigPath());
         }
 
         public static void Save(ZoomSettings settings)
@@ -69,6 +74,12 @@ namespace SlideSCI
         }
 
         private static string GetConfigPath()
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            return Path.Combine(appData, "SlideSCI Focus", "zoom_settings.xml");
+        }
+
+        private static string GetLegacyConfigPath()
         {
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             return Path.Combine(appData, "SlideSCI", "zoom_settings.xml");

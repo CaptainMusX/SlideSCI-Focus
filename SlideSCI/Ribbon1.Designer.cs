@@ -234,7 +234,7 @@ namespace SlideSCI
             this.tab2.Groups.Add(this.图片处理);
             this.tab2.Groups.Add(this.group1);
             this.tab2.Groups.Add(this.group3);
-            this.tab2.Label = "SlideSCI Figure";
+            this.tab2.Label = "SciFigure";
             this.tab2.Name = "tab2";
             // 
             // 图片自动对齐
@@ -627,7 +627,7 @@ namespace SlideSCI
             this.tab1.Groups.Add(this.排列);
             this.tab1.Groups.Add(this.codeGroup);
             this.tab1.Groups.Add(this.group2);
-            this.tab1.Label = "SlideSCI 工具";
+            this.tab1.Label = "SciStudio";
             this.tab1.Name = "tab1";
             // 
             // 复制图片格式
@@ -711,7 +711,7 @@ namespace SlideSCI
             this.group2.Items.Add(this.赞赏);
             this.group2.Items.Add(this.button4);
             this.group2.Items.Add(this.button5);
-            this.group2.Label = "关于";
+            this.group2.Label = "关于 SlideSCI Focus";
             this.group2.Name = "group2";
             // 
             // imgAutoAlign
@@ -1220,7 +1220,7 @@ namespace SlideSCI
             // 赞赏
             // 
             this.赞赏.Image = ((System.Drawing.Image)(resources.GetObject("赞赏.Image")));
-            this.赞赏.Label = "赞赏";
+            this.赞赏.Label = "支持项目";
             this.赞赏.Name = "赞赏";
             this.赞赏.ShowImage = true;
             this.赞赏.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.donate);

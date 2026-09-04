@@ -1,15 +1,20 @@
 <div align="center">
 
-# SlideSCI
+# SlideSCI Focus
 
-**一款面向科研绘图的 Microsoft PowerPoint 插件**（VSTO，Windows）
+**一款聚焦科研 Figure 工作流的 Microsoft PowerPoint 插件**（VSTO，Windows）
 
 </div>
 
-> 本仓库是 [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI) 的个人精简分支：
-> 移除了 AI 助手与素材库侧边栏，新增「局部放大」功能，并做了稳定性加固与安装器重构。
+> **SlideSCI Focus** 是 [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI) 的社区修改版：
+> 聚焦科研 Figure 工作流，移除了 AI 助手与素材库侧边栏，新增「局部放大」功能，并做了稳定性加固与安装器重构。
 
 ## ✨ 功能
+
+## 🧭 Ribbon 标签页
+
+- **SciFigure**：图片排版、图注与面板标签、局部放大、格式尺寸和导出
+- **SciStudio**：Markdown、LaTeX、代码、文字格式、选择以及通用工具
 
 ### 🔍 局部放大（期刊 Figure 风格）
 显微镜/电镜图片做"局部放大"效果（参考 Cell/Nature 等期刊样式）：
@@ -53,15 +58,15 @@
 
 ## 📥 安装方法
 
-1. 下载 [Release](https://github.com/CaptainMusX/SlideSCI/releases) 中的安装包（exe 或 setup.exe）
+1. 下载 [Release](https://github.com/CaptainMusX/SlideSCI-Focus/releases) 中的安装包（exe 或 setup.exe）
 2. **先退出 PowerPoint**，再双击安装
 3. 依赖环境：.NET Framework 4.7.2、Microsoft Visual Studio 2010 Tools for Office Runtime（安装器会自动提示）
 
-> 如果插件未显示：开发工具 → COM 加载项 → 勾选 `CaptainMusX.SlideSCI`，提示“未加载”请安装上述环境依赖后重启 PowerPoint。
+> 如果插件未显示：开发工具 → COM 加载项 → 勾选 `CaptainMusX.SlideSCI.Focus`，提示“未加载”请安装上述环境依赖后重启 PowerPoint。
 
 ## 🔧 开发与构建
 
-- 开发环境：Visual Studio + Visual Studio Tools For Office，打开 `SlideSCI.sln`
+- 开发环境：Visual Studio + Visual Studio Tools For Office，打开 `SlideSCI-Focus.sln`
 - 命令行构建安装包：`pwsh -File .\build\Build-Installer.ps1`（详见 `build/README.md`）
 - 「插入 LaTeX SVG」依赖 Node.js 运行时：
   ```
@@ -78,9 +83,10 @@
 
 ## 📄 协议与声明
 
-- 本分支基于 [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI)（AGPL-3.0）修改而来，保留原作者的全部版权与免责声明
-- 本仓库代码仅用于学习与科研用途，禁止用于商业用途；任何使用风险自行承担
+- 本项目基于 [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI)（AGPL-3.0）修改而来，修改者为 CaptainMusX，修改日期见 `CHANGELOG.md`
+- 本项目整体按 GNU AGPL-3.0 发布；发布编译产物时，请同时提供对应源代码、构建说明和本许可证
+- 原作者的版权、来源说明与无担保声明保留；本项目不代表原作者官方发行版，详见 [`NOTICE.md`](NOTICE.md)
 
 ## 💬 问题反馈
 
-- GitHub Issues：https://github.com/CaptainMusX/SlideSCI/issues
+- GitHub Issues：https://github.com/CaptainMusX/SlideSCI-Focus/issues

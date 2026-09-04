@@ -1,16 +1,21 @@
 <div align="center">
 
-# SlideSCI
+# SlideSCI Focus
 
-**A PowerPoint add-in for scientific figure preparation** (VSTO, Windows)
+**A focused PowerPoint add-in for scientific figure workflows** (VSTO, Windows)
 
 </div>
 
-> This repository is a personal trimmed fork of [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI):
-> the AI assistant and shape-library sidebars were removed, a new "Magnified Inset" (zoom inset)
-> feature was added, plus stability hardening and an installer pipeline rewrite.
+> **SlideSCI Focus** is a community-modified version of [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI):
+> it focuses on scientific figure workflows, removes the AI assistant and shape-library sidebars,
+> adds a "Magnified Inset" feature, and includes stability hardening and an installer pipeline rewrite.
 
 ## ✨ Features
+
+## 🧭 Ribbon tabs
+
+- **SciFigure**: image arrangement, captions and panel labels, magnified insets, formatting, sizing, and export
+- **SciStudio**: Markdown, LaTeX, code, text formatting, selection, and general tools
 
 ### 🔍 Magnified Inset (journal figure style)
 Create the classic "zoom-in" panel used in Cell/Nature-style figures from microscopy/EM images:
@@ -63,17 +68,17 @@ Create the classic "zoom-in" panel used in Cell/Nature-style figures from micros
 
 ## 📥 Installation
 
-1. Download the installer from the [Releases](https://github.com/CaptainMusX/SlideSCI/releases) page
+1. Download the installer from the [Releases](https://github.com/CaptainMusX/SlideSCI-Focus/releases) page
 2. **Quit PowerPoint first**, then run the installer
 3. Dependencies: .NET Framework 4.7.2 and Microsoft Visual Studio 2010 Tools for Office Runtime
    (the installer prompts automatically)
 
-> If the add-in does not appear: Developer → COM Add-ins → check `CaptainMusX.SlideSCI`.
+> If the add-in does not appear: Developer → COM Add-ins → check `CaptainMusX.SlideSCI.Focus`.
 > If it reports "Unhandled error", install the runtime dependencies above and restart PowerPoint.
 
 ## 🔧 Development & build
 
-- Visual Studio + Visual Studio Tools For Office; open `SlideSCI.sln`
+- Visual Studio + Visual Studio Tools For Office; open `SlideSCI-Focus.sln`
 - Build the installer from the command line: `pwsh -File .\build\Build-Installer.ps1`
   (see `build/README.md`)
 - For "Insert LaTeX SVG", a Node.js runtime is required:
@@ -93,10 +98,11 @@ Create the classic "zoom-in" panel used in Cell/Nature-style figures from micros
 
 ## 📄 License & notice
 
-- This fork is derived from [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI) (AGPL-3.0);
-  the original author's copyright and disclaimers remain in effect
-- For learning and scientific use only; commercial use is prohibited; use at your own risk
+- This project is a modified version of [Achuan-2/SlideSCI](https://github.com/Achuan-2/SlideSCI) (AGPL-3.0),
+  modified by CaptainMusX; see `CHANGELOG.md` for dates and `NOTICE.md` for attribution
+- The combined project is released under GNU AGPL-3.0. When distributing binaries, provide the corresponding
+  source code and build instructions; this project is not an official release by the original author
 
 ## 💬 Feedback
 
-- GitHub Issues: https://github.com/CaptainMusX/SlideSCI/issues
+- GitHub Issues: https://github.com/CaptainMusX/SlideSCI-Focus/issues

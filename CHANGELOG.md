@@ -1,3 +1,8 @@
+## v2.0.0 / 20260904
+- 🔖 插件正式更名为「SlideSCI Focus」，程序集与 VSTO 加载项身份迁移为 `CaptainMusX.SlideSCI.Focus`
+- 🔧 Ribbon 标签页重命名为 `SciFigure` 与 `SciStudio`，保持 Figure 工作流与通用工具的功能边界
+- 📜 补充修改版来源、AGPL-3.0 和发布源代码说明；保留原作者版权与免责声明
+
 ## v1.9.4 / 20260904
 - 🐛 修复局部放大设置窗体因自绘控件透明背景初始化异常而无法打开的问题
 

@@ -40,8 +40,10 @@ namespace SlideSCI
     /// </summary>
     public static class ZoomInsetHelper
     {
-        public const string BoxNamePrefix = "SlideSCI_ZoomBox_";
-        public const string InsetNamePrefix = "SlideSCI_ZoomInset_";
+        public const string BoxNamePrefix = "SlideSCIFocus_ZoomBox_";
+        public const string InsetNamePrefix = "SlideSCIFocus_ZoomInset_";
+        private const string LegacyBoxNamePrefix = "SlideSCI_ZoomBox_";
+        private const string LegacyInsetNamePrefix = "SlideSCI_ZoomInset_";
 
         private const float PointsPerCm = 28.3464593f;
         private const float SocketSizePoints = 6f;
@@ -146,15 +148,19 @@ namespace SlideSCI
 
         public static bool IsZoomBox(PowerPoint.Shape shape)
         {
-            return shape != null && (shape.Name ?? string.Empty)
-                .StartsWith(BoxNamePrefix, StringComparison.Ordinal);
+            if (shape == null) return false;
+            string name = shape.Name ?? string.Empty;
+            return name.StartsWith(BoxNamePrefix, StringComparison.Ordinal)
+                || name.StartsWith(LegacyBoxNamePrefix, StringComparison.Ordinal);
         }
 
         public static bool IsZoomArtifact(PowerPoint.Shape shape)
         {
             string name = shape?.Name ?? string.Empty;
             return name.StartsWith(BoxNamePrefix, StringComparison.Ordinal)
-                || name.StartsWith(InsetNamePrefix, StringComparison.Ordinal);
+                || name.StartsWith(InsetNamePrefix, StringComparison.Ordinal)
+                || name.StartsWith(LegacyBoxNamePrefix, StringComparison.Ordinal)
+                || name.StartsWith(LegacyInsetNamePrefix, StringComparison.Ordinal);
         }
 
         public static PowerPoint.Shape FindSourcePicture(PowerPoint.Slide slide,
@@ -819,8 +825,13 @@ namespace SlideSCI
         {
             pictureId = 0;
             string name = box?.Name ?? string.Empty;
-            if (!name.StartsWith(BoxNamePrefix, StringComparison.Ordinal)) return false;
-            string suffix = name.Substring(BoxNamePrefix.Length);
+            string prefix = name.StartsWith(BoxNamePrefix, StringComparison.Ordinal)
+                ? BoxNamePrefix
+                : name.StartsWith(LegacyBoxNamePrefix, StringComparison.Ordinal)
+                    ? LegacyBoxNamePrefix
+                    : null;
+            if (prefix == null) return false;
+            string suffix = name.Substring(prefix.Length);
             int separator = suffix.IndexOf('_');
             string idText = separator >= 0 ? suffix.Substring(0, separator) : suffix;
             return int.TryParse(idText, NumberStyles.Integer,
@@ -830,23 +841,29 @@ namespace SlideSCI
         private static string GetArtifactKey(PowerPoint.Shape box)
         {
             string name = box?.Name ?? string.Empty;
-            if (name.StartsWith(BoxNamePrefix, StringComparison.Ordinal))
+            string prefix = name.StartsWith(BoxNamePrefix, StringComparison.Ordinal)
+                ? BoxNamePrefix
+                : name.StartsWith(LegacyBoxNamePrefix, StringComparison.Ordinal)
+                    ? LegacyBoxNamePrefix
+                    : null;
+            if (prefix != null)
             {
-                string suffix = name.Substring(BoxNamePrefix.Length);
+                string suffix = name.Substring(prefix.Length);
                 if (suffix.IndexOf('_') >= 0) return suffix;
             }
             return box.Id.ToString(CultureInfo.InvariantCulture);
         }
 
         /// <summary>
-        /// 旧版本选区框名（无 GUID 段），例如 SlideSCI_ZoomBox_37。
+        /// 旧版本选区框名，例如 SlideSCI_ZoomBox_37 或其带 GUID 的变体。
         /// </summary>
         private static bool IsLegacyBoxName(PowerPoint.Shape box)
         {
             string name = box?.Name ?? string.Empty;
+            if (name.StartsWith(LegacyBoxNamePrefix, StringComparison.Ordinal)) return true;
             if (!name.StartsWith(BoxNamePrefix, StringComparison.Ordinal)) return false;
             string suffix = name.Substring(BoxNamePrefix.Length);
-            // 新格式 = <图片Id>_<8位hex>；旧格式 = 仅 <图片Id>
+            // Focus 格式 = <图片Id>_<8位hex>；其他当前前缀格式视为旧格式。
             int separator = suffix.IndexOf('_');
             if (separator < 0) return true;
             string idPart = suffix.Substring(0, separator);
@@ -865,13 +882,13 @@ namespace SlideSCI
         }
 
         /// <summary>
-        /// 删除指定图片的旧格式生成物（SlideSCI_ZoomInset_&lt;图片Id&gt;_*，无 GUID 段），
-        /// 逐层拆开包含它们的编组；不影响新版多实例的其他选区。返回清理数量。
+        /// 删除指定图片的旧格式生成物（SlideSCI_ZoomInset_&lt;图片Id&gt;_*），
+        /// 逐层拆开包含它们的编组；不影响 Focus 版多实例的其他选区。返回清理数量。
         /// </summary>
         private static int CleanLegacyArtifacts(PowerPoint.Slide slide, int pictureId)
         {
             if (slide == null) return 0;
-            string legacyPrefix = InsetNamePrefix + pictureId.ToString(CultureInfo.InvariantCulture) + "_";
+            string legacyPrefix = LegacyInsetNamePrefix + pictureId.ToString(CultureInfo.InvariantCulture) + "_";
 
             bool IsLegacyName(string name)
             {

@@ -25,28 +25,28 @@
     <OutputType>Library</OutputType>
     <NoStandardLibraries>false</NoStandardLibraries>
     <RootNamespace>SlideSCI</RootNamespace>
-    <!-- A fork-specific VSTO identity prevents Office from reusing stale
-         ClickOnce state belonging to the upstream SlideSCI add-in ID. -->
-    <AssemblyName>CaptainMusX.SlideSCI</AssemblyName>
+    <!-- SlideSCI Focus uses a distinct VSTO identity from both the upstream
+         SlideSCI add-in and the earlier CaptainMusX.SlideSCI fork identity. -->
+    <AssemblyName>CaptainMusX.SlideSCI.Focus</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <DefineConstants>VSTO40</DefineConstants>
     <IsWebBootstrapper>False</IsWebBootstrapper>
     <BootstrapperEnabled>true</BootstrapperEnabled>
-    <PublishUrl>D:\Code\SlideSCI\SlideSCI\publish\</PublishUrl>
+    <PublishUrl>publish\</PublishUrl>
     <InstallUrl />
     <TargetCulture>zh-chs</TargetCulture>
-    <ApplicationVersion>1.9.4.0</ApplicationVersion>
+    <ApplicationVersion>2.0.0.0</ApplicationVersion>
     <AutoIncrementApplicationRevision>false</AutoIncrementApplicationRevision>
     <UpdateEnabled>true</UpdateEnabled>
     <UpdateInterval>7</UpdateInterval>
     <UpdateIntervalUnits>days</UpdateIntervalUnits>
-    <ProductName>SlideSCI</ProductName>
-    <PublisherName>Achuan-2</PublisherName>
+    <ProductName>SlideSCI Focus</ProductName>
+    <PublisherName>CaptainMusX</PublisherName>
     <SupportUrl />
-    <FriendlyName>SlideSCI</FriendlyName>
+    <FriendlyName>SlideSCI Focus</FriendlyName>
     <OfficeApplicationDescription />
     <LoadBehavior>3</LoadBehavior>
-    <SlideSCIBundleLatexRuntime Condition="'$(SlideSCIBundleLatexRuntime)' == ''">false</SlideSCIBundleLatexRuntime>
+    <SlideSCIFocusBundleLatexRuntime Condition="'$(SlideSCIFocusBundleLatexRuntime)' == ''">false</SlideSCIFocusBundleLatexRuntime>
   </PropertyGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.7.2">
@@ -268,22 +268,22 @@
          ClickOnce path-length warnings much worse. -->
     <Content Include="latex-converter\node_modules\**\*.js"
              Exclude="latex-converter\node_modules\mathjax-full\components\**;latex-converter\node_modules\mathjax-full\ts\**;latex-converter\node_modules\mathjax-full\js\input\asciimath\**"
-             Condition="'$(SlideSCIBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
+             Condition="'$(SlideSCIFocusBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="latex-converter\node_modules\**\*.cjs"
              Exclude="latex-converter\node_modules\mathjax-full\components\**;latex-converter\node_modules\mathjax-full\ts\**;latex-converter\node_modules\mathjax-full\js\input\asciimath\**"
-             Condition="'$(SlideSCIBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
+             Condition="'$(SlideSCIFocusBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="latex-converter\node_modules\**\*.mjs"
              Exclude="latex-converter\node_modules\mathjax-full\components\**;latex-converter\node_modules\mathjax-full\ts\**;latex-converter\node_modules\mathjax-full\js\input\asciimath\**"
-             Condition="'$(SlideSCIBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
+             Condition="'$(SlideSCIFocusBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="latex-converter\node_modules\**\*.json"
              Exclude="latex-converter\node_modules\mathjax-full\components\**;latex-converter\node_modules\mathjax-full\ts\**;latex-converter\node_modules\mathjax-full\js\input\asciimath\**"
-             Condition="'$(SlideSCIBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
+             Condition="'$(SlideSCIFocusBundleLatexRuntime)' == 'true' and Exists('latex-converter\node_modules')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
@@ -300,9 +300,9 @@
   <!-- Signing inputs are supplied by build/Build-Installer.ps1 or a local
        Visual Studio environment. Private keys are not stored in the repository. -->
   <PropertyGroup>
-    <ManifestKeyFile Condition="'$(SlideSCIManifestKeyFile)' != ''">$(SlideSCIManifestKeyFile)</ManifestKeyFile>
-    <AssemblyOriginatorKeyFile Condition="'$(SlideSCIAssemblyKeyFile)' != ''">$(SlideSCIAssemblyKeyFile)</AssemblyOriginatorKeyFile>
-    <ManifestCertificateThumbprint Condition="'$(SlideSCIManifestCertificateThumbprint)' != ''">$(SlideSCIManifestCertificateThumbprint)</ManifestCertificateThumbprint>
+    <ManifestKeyFile Condition="'$(SlideSCIFocusManifestKeyFile)' != ''">$(SlideSCIFocusManifestKeyFile)</ManifestKeyFile>
+    <AssemblyOriginatorKeyFile Condition="'$(SlideSCIFocusAssemblyKeyFile)' != ''">$(SlideSCIFocusAssemblyKeyFile)</AssemblyOriginatorKeyFile>
+    <ManifestCertificateThumbprint Condition="'$(SlideSCIFocusManifestCertificateThumbprint)' != ''">$(SlideSCIFocusManifestCertificateThumbprint)</ManifestCertificateThumbprint>
   </PropertyGroup>
   <!-- Include the build rules for a C# project. -->
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

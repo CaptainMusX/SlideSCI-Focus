@@ -6,7 +6,7 @@ using System.Windows.Forms;
 namespace SlideSCI
 {
     /// <summary>
-    /// Shared visual tokens for SlideSCI desktop dialogs. The palette is tuned
+    /// Shared visual tokens for SlideSCI Focus desktop dialogs. The palette is tuned
     /// for a dense biomedical research tool rather than a consumer/mobile UI.
     /// </summary>
     internal static class ScientificUiTheme

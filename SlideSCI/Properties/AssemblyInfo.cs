@@ -4,12 +4,12 @@ using System.Runtime.InteropServices;
 // 有关程序集的一般信息由以下
 // 控制。更改这些特性值可修改
 // 与程序集关联的信息。
-[assembly: AssemblyTitle("SlideSCI")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyTitle("SlideSCI Focus")]
+[assembly: AssemblyDescription("A focused community-modified PowerPoint add-in for scientific figure preparation")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("SlideSCI")]
-[assembly: AssemblyCopyright("Copyright ©  2025")]
+[assembly: AssemblyCompany("CaptainMusX")]
+[assembly: AssemblyProduct("SlideSCI Focus")]
+[assembly: AssemblyCopyright("Copyright © 2025-2026 CaptainMusX; portions derived from Achuan-2/SlideSCI")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -31,6 +31,6 @@ using System.Runtime.InteropServices;
 //可以指定所有这些值，也可以使用“生成号”和“修订号”的默认值，
 // 方法是按如下所示使用“*”: :
 // [assembly: AssemblyVersion("1.0.*")]
-[assembly: AssemblyVersion("1.9.4.0")]
-[assembly: AssemblyFileVersion("1.9.4.0")]
+[assembly: AssemblyVersion("2.0.0.0")]
+[assembly: AssemblyFileVersion("2.0.0.0")]
 
