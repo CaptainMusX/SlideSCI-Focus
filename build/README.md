@@ -15,6 +15,8 @@ pwsh -File .\build\Build-Installer.ps1
 
 默认不把 MathJax 的 `node_modules` 放进发布目录，以保持与原作者 Release 一致；如需离线 LaTeX SVG 运行时，可显式运行 `-BundleLatexRuntime`。
 
+`Build-Installer.ps1` 会通过 MSBuild 的 `RestorePackagesConfig=true` 自动还原 `packages.config` 中的 NuGet 依赖；本地 `packages` 缓存不需要提交到仓库。
+
 本地没有配置正式代码签名证书时，脚本会在当前用户的 `%LOCALAPPDATA%\SlideSCI-Focus\build-signing` 中生成开发用自签名证书。它适合本机测试，正式分发前应替换为受信任的发布证书，并保留同一签名身份用于后续更新。
 
 ## Inno Setup 安装包
