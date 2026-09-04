@@ -232,6 +232,12 @@ $msbuildArguments = @(
 Push-Location $repoRoot
 try
 {
+    $restoreArguments = @($msbuildArguments)
+    $restoreArguments[1] = "/t:Restore"
+    $restoreArguments += "/p:RestorePackagesConfig=true"
+    & $msbuild.Path @restoreArguments
+    if ($LASTEXITCODE -ne 0) { throw "NuGet 包还原失败，MSBuild exit code=$LASTEXITCODE" }
+
     $cleanArguments = @($msbuildArguments)
     $cleanArguments[1] = "/t:Clean"
     & $msbuild.Path @cleanArguments
