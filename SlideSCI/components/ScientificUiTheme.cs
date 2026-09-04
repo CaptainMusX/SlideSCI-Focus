@@ -47,6 +47,19 @@ namespace SlideSCI
             form.KeyPreview = true;
         }
 
+        /// <summary>
+        /// Arms the first-show DPI scaling after a code-built dialog has added
+        /// all controls and finished any text-dependent layout.  Calling this
+        /// earlier lets WinForms consume the scale pass before child controls
+        /// exist, which leaves fixed bounds at 96 DPI while fonts render at the
+        /// monitor DPI.
+        /// </summary>
+        internal static void CompleteCodeBuiltLayout(Form form)
+        {
+            if (form == null) throw new ArgumentNullException(nameof(form));
+            form.AutoScaleDimensions = new SizeF(96f, 96f);
+        }
+
         internal static GraphicsPath RoundedPath(Rectangle bounds, int radius)
         {
             var path = new GraphicsPath();

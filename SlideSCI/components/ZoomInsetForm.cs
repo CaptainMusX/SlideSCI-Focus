@@ -75,6 +75,7 @@ namespace SlideSCI
             BuildLayout(s);
             SyncInputsEnabled();
             UpdatePreview();
+            ScientificUiTheme.CompleteCodeBuiltLayout(this);
         }
 
         private void BuildLayout(ZoomSettings s)

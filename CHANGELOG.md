@@ -1,3 +1,7 @@
+## v2.0.1 / 20260904
+- 🐛 修复局部放大设置窗口在 Windows 200% 缩放下文字重叠、控件截断和按钮显示不完整的问题
+- 🎨 代码构建型窗口在全部控件完成布局后再应用 96 DPI 设计基线，兼容 100%–200% 缩放
+
 ## v2.0.0 / 20260904
 - 🔖 插件正式更名为「SlideSCI Focus」，程序集与 VSTO 加载项身份迁移为 `CaptainMusX.SlideSCI.Focus`
 - 🔧 Ribbon 标签页重命名为 `SciFigure` 与 `SciStudio`，保持 Figure 工作流与通用工具的功能边界
