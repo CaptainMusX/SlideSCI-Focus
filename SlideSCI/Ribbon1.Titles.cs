@@ -14,7 +14,6 @@ namespace SlideSCI
         private int titleAlignmentIndex = 1;
         private readonly string[] titleAlignmentIcons = { "AlignLeft", "AlignCenter", "AlignRight", "AlignJustify" };
         private readonly string[] titleAlignmentLabels = { "左对齐", "居中", "右对齐", "两端对齐" };
-        private readonly List<RibbonToggleButton> titleAlignmentChoices = new List<RibbonToggleButton>();
 
         private void InitializeTitleRibbon()
         {
@@ -26,10 +25,12 @@ namespace SlideSCI
             AddTitleButton.Label = "添加下标题";
             vertical.Items.Add(图片上标题); vertical.Items.Add(AddTitleButton);
             distanceFromBottomEditBox.Label = "上下偏移";
-            distanceFromBottomEditBox.SizeString = "00";
+            distanceFromBottomEditBox.SizeString = "000000";
             distanceFromBottomEditBox.ScreenTip = "上下偏移 (pt)";
             distanceFromBottomEditBox.SuperTip = "正值向下，负值向上；与左右偏移叠加，对新生成的四个方向标题都生效。";
-            vertical.Items.Add(distanceFromBottomEditBox); 图片处理.Items.Add(vertical);
+            vertical.Items.Add(distanceFromBottomEditBox);
+            图片处理.Items.Add(vertical);
+            图片处理.Items.Add(CreateTitleColumnSeparator("上、下标题与偏移"));
 
             var horizontal = Factory.CreateRibbonBox(); horizontal.BoxStyle = RibbonBoxStyle.Vertical;
             horizontal.Items.Add(CreateSideTitleButton("添加左标题", PictureTitleSide.Left));
@@ -39,14 +40,22 @@ namespace SlideSCI
             titleOffsetXCombo.Label = "左右偏移"; titleOffsetXCombo.SizeString = "00";
             titleOffsetXCombo.ScreenTip = "左右偏移 (pt)";
             titleOffsetXCombo.SuperTip = "正值向右，负值向左；与上下偏移叠加，对新生成的四个方向标题都生效。";
-            horizontal.Items.Add(titleOffsetXCombo); 图片处理.Items.Add(horizontal);
+            horizontal.Items.Add(titleOffsetXCombo);
+            图片处理.Items.Add(horizontal);
+            图片处理.Items.Add(CreateTitleColumnSeparator("左、右标题与偏移"));
 
             var format = Factory.CreateRibbonBox(); format.BoxStyle = RibbonBoxStyle.Vertical;
-            titleTextEditBox.SizeString = "微软雅黑000000";
-            fontNameEditBox.Label = "字体"; fontNameEditBox.SizeString = "微软雅黑000000";
+            // ComboBox has a built-in drop-down affordance. Give the plain title
+            // edit box the equivalent extra character width so their right edges
+            // line up in the Ribbon.
+            titleTextEditBox.SizeString = "0000000000";
+            fontNameEditBox.Label = "字体"; fontNameEditBox.SizeString = "00000000";
             format.Items.Add(titleTextEditBox); format.Items.Add(fontNameEditBox);
             var row = Factory.CreateRibbonBox(); row.BoxStyle = RibbonBoxStyle.Horizontal;
             fontSizeEditBox.Label = "字号"; fontSizeEditBox.SizeString = "000";
+            autoGroupCheckBox.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
+            autoGroupCheckBox.ShowImage = false;
+            autoGroupCheckBox.ShowLabel = true;
             row.Items.Add(fontSizeEditBox); row.Items.Add(autoGroupCheckBox);
             titleAlignmentMenu = Factory.CreateRibbonMenu();
             titleAlignmentMenu.Name = "titleAlignmentMenu";
@@ -54,13 +63,23 @@ namespace SlideSCI
             for (int i = 0; i < titleAlignmentIcons.Length; i++)
             {
                 int index = i;
-                var choice = Factory.CreateRibbonToggleButton();
+                // Use ordinary buttons for menu items. ToggleButton.Checked draws
+                // the unwanted selection frame shown in the menu popup; the
+                // current choice is represented solely by the menu's top icon.
+                var choice = Factory.CreateRibbonButton();
                 choice.Label = titleAlignmentLabels[i]; choice.OfficeImageId = titleAlignmentIcons[i]; choice.ShowImage = true;
                 choice.Click += (s, e) => { SetTitleAlignment(index); SaveSettings(s, e); };
-                titleAlignmentChoices.Add(choice); titleAlignmentMenu.Items.Add(choice);
+                titleAlignmentMenu.Items.Add(choice);
             }
             SetTitleAlignment(1);
-            row.Items.Add(titleAlignmentMenu); format.Items.Add(row); 图片处理.Items.Add(format);
+            row.Items.Add(titleAlignmentMenu);
+            // Keep the compact third row as its own vertical layout item. Office
+            // then applies the same inter-row baseline spacing used by the other
+            // stacked ComboBoxes instead of abutting it against the font box.
+            var rowSlot = Factory.CreateRibbonBox(); rowSlot.BoxStyle = RibbonBoxStyle.Vertical;
+            rowSlot.Items.Add(row);
+            format.Items.Add(rowSlot);
+            图片处理.Items.Add(format);
         }
 
         private RibbonButton CreateSideTitleButton(string label, PictureTitleSide side)
@@ -78,7 +97,14 @@ namespace SlideSCI
             titleAlignmentMenu.OfficeImageId = titleAlignmentIcons[titleAlignmentIndex];
             titleAlignmentMenu.Label = titleAlignmentLabels[titleAlignmentIndex];
             titleAlignmentMenu.ScreenTip = "标题对齐：" + titleAlignmentLabels[titleAlignmentIndex];
-            for (int i = 0; i < titleAlignmentChoices.Count; i++) titleAlignmentChoices[i].Checked = i == titleAlignmentIndex;
+        }
+
+        private RibbonSeparator CreateTitleColumnSeparator(string title)
+        {
+            var separator = Factory.CreateRibbonSeparator();
+            separator.Name = "titleSeparator_" + title.GetHashCode().ToString("X8");
+            separator.Title = title;
+            return separator;
         }
 
         private void AddPictureTitles(PictureTitleSide side)

@@ -23,3 +23,11 @@
 - 未修改正在打开的用户汇报文稿，未安装新版。真实 Ribbon 在用户缩放比例下的列宽、控件显示和点击交互，以及安装卸载、冷启动仍待人工验收。跨进程 GetImageMso 无法取得图像句柄，测试改为检查原生命令 ID；不将其视为图标渲染验收。
 
 安装包：F:\SlideSCI\artifacts\inno\SlideSCI-Focus-2.0.5.0-Setup.exe。签名为本地开发证书，不是公共信任链证书。
+
+## v2.0.6 视觉微调
+
+- 三列之间加入 RibbonSeparator；第三列标题输入框为 `0000000000`，字体下拉框为 `00000000`，补偿下拉箭头后统一右边界。
+- 第三行放入独立的垂直布局槽，避免字号/编组/对齐行紧贴字体输入框。
+- 对齐菜单项改为 `RibbonButton`，不再使用带 `Checked` 状态的 `RibbonToggleButton`，因此展开菜单的四个图标保持相同外观。
+
+v2.0.6 安装包：F:\SlideSCI\artifacts\inno\SlideSCI-Focus-2.0.6.0-Setup.exe。
