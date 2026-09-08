@@ -13,6 +13,11 @@ namespace SlideSCI
         private const string TitleWideSize = "00000000000000";
         private RibbonComboBox titleOffsetXCombo;
         private RibbonMenu titleAlignmentMenu;
+        private RibbonMenu titleFontSizeMenu;
+        private static readonly string[] TitleFontSizePresets =
+        {
+            "2", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "18", "20", "22", "24", "26", "28", "30", "40", "50", "60", "80", "100", "120", "150", "200"
+        };
         private int titleAlignmentIndex = 1;
         private readonly string[] titleAlignmentIcons = { "AlignLeft", "AlignCenter", "AlignRight", "AlignJustify" };
         private readonly string[] titleAlignmentLabels = { "左对齐", "居中", "右对齐", "两端对齐" };
@@ -56,7 +61,8 @@ namespace SlideSCI
             format.Items.Add(fontNameEditBox);
             图片处理.Items.Add(format);
 
-            // 第三行直接使用水平盒，不能再包垂直槽或挂到分组顶层。
+            // 第三行避免把较高的 ComboBox 再嵌入水平盒。
+            // 使用 EditBox + 独立预设菜单保留手输/预设字号，减少行高占用。
             autoGroupCheckBox.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
             autoGroupCheckBox.ShowImage = false;
             autoGroupCheckBox.ShowLabel = true;
@@ -77,10 +83,36 @@ namespace SlideSCI
             SetTitleAlignment(1);
             var options = Factory.CreateRibbonBox(); options.BoxStyle = RibbonBoxStyle.Horizontal;
             options.Name = "titleFormattingRow";
+            fontSizeEditBox.ScreenTip = "标题字号 (pt)";
+            titleFontSizeMenu = Factory.CreateRibbonMenu();
+            titleFontSizeMenu.Name = "titleFontSizeMenu";
+            titleFontSizeMenu.Label = "预设字号";
+            titleFontSizeMenu.ShowLabel = false;
+            titleFontSizeMenu.ShowImage = false;
+            titleFontSizeMenu.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
+            titleFontSizeMenu.ScreenTip = "选择预设字号";
             options.Items.Add(fontSizeEditBox);
+            options.Items.Add(titleFontSizeMenu);
             options.Items.Add(autoGroupCheckBox);
             options.Items.Add(titleAlignmentMenu);
             format.Items.Add(options);
+            PopulateTitleFontSizePresets(TitleFontSizePresets);
+        }
+
+        private void PopulateTitleFontSizePresets(IEnumerable<string> values)
+        {
+            titleFontSizeMenu.Items.Clear();
+            foreach (string value in values)
+            {
+                var choice = Factory.CreateRibbonButton();
+                choice.Label = value;
+                choice.Click += (sender, args) =>
+                {
+                    fontSizeEditBox.Text = value;
+                    SaveSettings(sender, args);
+                };
+                titleFontSizeMenu.Items.Add(choice);
+            }
         }
 
         private RibbonButton CreateSideTitleButton(string label, PictureTitleSide side)

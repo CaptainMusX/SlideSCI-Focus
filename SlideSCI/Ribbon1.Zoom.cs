@@ -9,6 +9,9 @@ namespace SlideSCI
     public partial class Ribbon1
     {
         private const string ZoomNumberSize = "0000";
+        // ComboBox 标签比普通菜单/切换按钮的文字少一个原生左边距。
+        // 不换行空格仅用于显示，不能写入数值 Text 或解析输入。
+        private const string ZoomLabelInset = "\u00A0";
         private ZoomSettings zoomRibbonSettings;
         private RibbonComboBox zoomSizeCombo, zoomGapCombo;
         private RibbonToggleButton zoomGroupCheck;
@@ -27,7 +30,7 @@ namespace SlideSCI
             var selection = Factory.CreateRibbonBox();
             selection.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
             selection.Items.Add(btnInsertZoomBox);
-            zoomBoxPercentCombo.Label = "尺寸";
+            zoomBoxPercentCombo.Label = ZoomLabelInset + "尺寸";
             zoomBoxPercentCombo.SizeString = ZoomNumberSize;
             zoomBoxPercentCombo.Text = zoomRibbonSettings.BoxPercent.ToString(CultureInfo.CurrentCulture);
             zoomBoxPercentCombo.ScreenTip = "选区框边长占原图短边的百分比（5–90）";
@@ -47,7 +50,7 @@ namespace SlideSCI
             generate.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
             generate.Items.Add(btnGenerateZoomInset);
             zoomSizeCombo = Factory.CreateRibbonComboBox();
-            zoomSizeCombo.Label = "尺寸";
+            zoomSizeCombo.Label = ZoomLabelInset + "尺寸";
             zoomSizeCombo.SizeString = "原图等宽";
             zoomSizeCombo.ScreenTip = "放大图尺寸";
             zoomSizeCombo.SuperTip = "输入“原图等宽”、放大倍数（如 2x）或宽度（如 5cm）。始终保持选区宽高比。";
@@ -63,7 +66,7 @@ namespace SlideSCI
             var options = Factory.CreateRibbonBox();
             options.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
             zoomGapCombo = Factory.CreateRibbonComboBox();
-            zoomGapCombo.Label = "间距";
+            zoomGapCombo.Label = ZoomLabelInset + "间距";
             zoomGapCombo.SizeString = ZoomNumberSize;
             zoomGapCombo.Text = ZoomInsetHelper.CmToPoints(zoomRibbonSettings.GapCm).ToString("0.##", CultureInfo.CurrentCulture);
             zoomGapCombo.ScreenTip = "原图与放大图之间的距离 (pt)";

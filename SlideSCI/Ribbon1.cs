@@ -359,39 +359,7 @@ namespace SlideSCI
             FreshCombobox(fontNameEditBox, FontNames);
             FreshCombobox(labelFontNameEditBox, FontNames);
             //字号
-            List<string> FontSizes = new List<string>()
-            {
-                "2",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "9",
-                "10",
-                "11",
-                "12",
-                "13",
-                "14",
-                "15",
-                "16",
-                "18",
-                "20",
-                "22",
-                "24",
-                "26",
-                "28",
-                "30",
-                "40",
-                "50",
-                "60",
-                "80",
-                "100",
-                "120",
-                "150",
-                "200",
-            };
-            FreshCombobox(fontSizeEditBox, FontSizes);
+            var FontSizes = new List<string>(TitleFontSizePresets);
             FreshCombobox(labelFontSizeEditBox, FontSizes);
             //图片宽度和高度
             List<string> PicSizes = new List<string>()

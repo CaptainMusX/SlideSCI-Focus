@@ -39,21 +39,41 @@ for($i=0;$i -lt 2;$i++) {
 Check ($format.BoxStyle.ToString() -eq 'Vertical' -and $format.Items.Count -eq 3) 'third column holds three rows'
 Check ($format.Items[0].Label -eq '标题' -and $format.Items[1].Label -eq '字体' -and $options.Items[0].Label -eq '字号') 'third column rows are title, font and font size'
 Check ($options.Items[0].SizeString -eq $left.Items[2].SizeString) 'font size matches both offsets'
-Check ($options.BoxStyle.ToString() -eq 'Horizontal' -and $options.Items.Count -eq 3) 'third row holds font size, grouping and alignment horizontally'
-Check ($options.Items[1].GetType().Name -match 'Toggle' -and $options.Items[1].Label -eq '编组') 'grouping toggle in the third row'
-Check ($options.Items[2].Items.Count -eq 4 -and @($options.Items[2].Items | Where-Object {$_.GetType().Name -match 'Toggle'}).Count -eq 0) 'four ordinary alignment buttons'
+Check ($options.BoxStyle.ToString() -eq 'Horizontal' -and $options.Items.Count -eq 4) 'third row holds compact font size, presets, grouping and alignment horizontally'
+Check ($options.Items[2].GetType().Name -match 'Toggle' -and $options.Items[2].Label -eq '编组') 'grouping toggle in the third row'
+Check ($options.Items[3].Items.Count -eq 4 -and @($options.Items[3].Items | Where-Object {$_.GetType().Name -match 'Toggle'}).Count -eq 0) 'four ordinary alignment buttons'
+
+Check (@($options.Items[0].GetType().GetInterfaces().Name) -contains 'RibbonEditBox') 'font size uses the compact editable control'
+Check ($options.Items[1].Name -eq 'titleFontSizeMenu' -and -not $options.Items[1].ShowLabel -and -not $options.Items[1].ShowImage) 'font size presets keep an arrow-only menu'
+Check ($options.Items[1].Items.Count -eq 29 -and $options.Items[1].Items[0].Label -eq '2' -and $options.Items[1].Items[28].Label -eq '200') 'all original font size presets are ready before Ribbon Load'
+$populate=$dll.GetType('SlideSCI.Ribbon1').GetMethod('PopulateTitleFontSizePresets',$flags)
+$arguments=New-Object object[] 1; $arguments[0]=[string[]]@('8','12','24')
+$originalSize=$options.Items[0].Text
+$originalPresets=[string[]]@($options.Items[1].Items | ForEach-Object {$_.Label})
+$options.Items[0].Text='13.5'
+$null=$populate.Invoke($ribbon,$arguments)
+Check ((@($options.Items[1].Items | ForEach-Object {$_.Label}) -join ',') -eq '8,12,24') 'font size preset values and order preserved'
+$null=$populate.Invoke($ribbon,$arguments)
+Check ($options.Items[1].Items.Count -eq 3 -and $options.Items[0].Text -eq '13.5') 'rebuilding presets neither duplicates entries nor changes typed size'
+$arguments[0]=$originalPresets; $null=$populate.Invoke($ribbon,$arguments)
+$options.Items[0].Text=$originalSize
 
 # ---- 局部放大：三列功能分组，每列三行单控件 ----
 $zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
 Check ($zoom.Items.Count -eq 3) 'zoom group keeps three columns'
 $col1=$zoom.Items[0]; $col2=$zoom.Items[1]; $col3=$zoom.Items[2]
 Check ($col1.BoxStyle.ToString() -eq 'Vertical' -and $col1.Items.Count -eq 3) 'selection column has three rows'
-Check ($col1.Items[0].Label -eq '选区' -and $col1.Items[1].Label -eq '尺寸' -and $col1.Items[2].Label -match '^框线') 'selection column is 选区/尺寸/框线'
-Check ($col2.Items[0].Label -eq '放大' -and $col2.Items[1].Label -eq '尺寸' -and $col2.Items[2].Label -match '^引线') 'generate column is 放大/尺寸/引线'
-Check ($col3.Items[0].Label -eq '间距' -and $col3.Items[1].Label -match '^连线' -and $col3.Items[2].Label -eq '编组') 'options column is 间距/连线/编组'
+Check ($col1.Items[0].Label -eq '选区' -and $col1.Items[1].Label.Trim() -eq '尺寸' -and $col1.Items[2].Label -match '^框线') 'selection column is 选区/尺寸/框线'
+Check ($col2.Items[0].Label -eq '放大' -and $col2.Items[1].Label.Trim() -eq '尺寸' -and $col2.Items[2].Label -match '^引线') 'generate column is 放大/尺寸/引线'
+Check ($col3.Items[0].Label.Trim() -eq '间距' -and $col3.Items[1].Label -match '^连线' -and $col3.Items[2].Label -eq '编组') 'options column is 间距/连线/编组'
 Check ($col3.Items[2].GetType().Name -match 'Toggle') 'zoom grouping control is a toggle button'
 foreach($col in @($col1,$col2,$col3)) { foreach($item in $col.Items) { Check ($item.GetType().Name -ne 'RibbonBox') 'zoom columns have no nested layout box' } }
 Check ($col1.Items[1].SizeString -eq $col3.Items[0].SizeString) 'selection size and gap share the same narrow width'
+
+foreach($combo in @($col1.Items[1],$col2.Items[1],$col3.Items[0])) {
+ Check ($combo.Label.StartsWith([string][char]0x00A0)) 'zoom input label has a fixed optical inset'
+ Check (-not $combo.Text.Contains([string][char]0x00A0)) 'optical inset never enters numeric text'
+}
 
 # ---- 序列化真实 Ribbon XML ----
 # 确认水平选项行是第三列的直接第三个子项，避免独立列或额外垂直槽。
@@ -64,7 +84,7 @@ $ns=[Xml.XmlNamespaceManager]::new($xml.NameTable); $ns.AddNamespace('r',$xml.Do
 $titleXml=$xml.SelectSingleNode('//r:group[@id="图片处理"]',$ns)
 Check ($titleXml.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized title group keeps three top-level columns'
 Check ($titleXml.SelectNodes('.//r:box[@boxStyle="horizontal"]',$ns).Count -eq 1) 'title group has exactly one horizontal formatting row'
-Check ($titleXml.SelectNodes('./r:box[3]/r:box[@boxStyle="horizontal"]/*',$ns).Count -eq 3) 'serialized third column contains all three formatting controls in one row'
+Check ($titleXml.SelectNodes('./r:box[3]/r:box[@boxStyle="horizontal"]/*',$ns).Count -eq 4) 'serialized third column contains all formatting controls in one row'
 $zoomXml=$xml.SelectSingleNode('//r:group[@id="zoomGroup"]',$ns)
 Check ($zoomXml.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized zoom group keeps three top-level columns'
 Check ($zoomXml.SelectNodes('.//r:box[@boxStyle="horizontal"]',$ns).Count -eq 0) 'zoom group has no horizontal box that shifts a row upward'
@@ -88,12 +108,13 @@ if($CreatePreview) {
   foreach($attribute in @($element.Attributes)) { if($attribute.Name -match '^(get|on)' -or $attribute.Name -in @('loadImage','tag')){$element.RemoveAttribute($attribute.Name)} }
   if(-not $control){continue}
   foreach($property in @('Label','ShowLabel','ShowImage','Enabled','Visible')) {
+   if($property -eq 'Enabled' -and $element.LocalName -in @('box','separator','group','tab')) { continue }
    if($control.PSObject.Properties[$property]) {
     $value=$control.$property
     if($null -ne $value -and "$value" -ne '') { $element.SetAttribute($property.Substring(0,1).ToLower()+$property.Substring(1),$(if($value -is [bool]){$value.ToString().ToLower()}else{"$value"})) }
    }
   }
-  if($control.PSObject.Properties['ControlSize']){$element.SetAttribute('size',$(if($control.ControlSize.ToString() -match 'Large'){'large'}else{'normal'}))}
+  if($control.PSObject.Properties['ControlSize'] -and -not $element.SelectSingleNode('ancestor::r:menu | ancestor::r:buttonGroup',$ns)){$element.SetAttribute('size',$(if($control.ControlSize.ToString() -match 'Large'){'large'}else{'normal'}))}
   if($control.PSObject.Properties['OfficeImageId'] -and $control.OfficeImageId){$element.SetAttribute('imageMso',$control.OfficeImageId)}
   elseif($control.PSObject.Properties['Image'] -and $control.Image){
    $imageIndex++; $key="rIdImage$imageIndex"; $path=Join-Path $output "$key.png"
