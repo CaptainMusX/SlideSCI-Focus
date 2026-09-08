@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Microsoft.Office.Core;
@@ -20,7 +20,8 @@ namespace SlideSCI
     public enum ZoomLineStyle
     {
         JournalFunnel = 0,
-        CrossedX = 1
+        CrossedX = 1,
+        None = 2
     }
 
     public sealed class ZoomInsetResult
@@ -46,7 +47,6 @@ namespace SlideSCI
         private const string LegacyInsetNamePrefix = "SlideSCI_ZoomInset_";
 
         private const float PointsPerCm = 28.3464593f;
-        private const float SocketSizePoints = 6f;
         private const float GeometryTolerance = 0.5f;
         private const float SlideMarginPoints = 6f;
 
@@ -118,6 +118,19 @@ namespace SlideSCI
                 }
             }
             catch { }
+
+            if (selectedBoxes.Count == 0 && selection != null)
+            {
+                try
+                {
+                    var all = FindZoomBoxes(slide);
+                    foreach (PowerPoint.Shape selected in selection.ShapeRange)
+                        foreach (PowerPoint.Shape candidate in all)
+                            if ((selected.Name ?? "").StartsWith(InsetNamePrefix + GetArtifactKey(candidate) + "_", StringComparison.Ordinal)
+                                && selectedIds.Add(candidate.Id)) selectedBoxes.Add(candidate);
+                }
+                catch { }
+            }
 
             if (selectedBoxes.Count == 1)
             {
@@ -246,7 +259,7 @@ namespace SlideSCI
             int boxColorRgb,
             Office.MsoLineDashStyle lineDash,
             bool group,
-            PowerPoint.Application app)
+            PowerPoint.Application app, Office.MsoLineDashStyle boxDash = Office.MsoLineDashStyle.msoLineSolid)
         {
             var result = new ZoomInsetResult();
             string artifactKey = null;
@@ -282,26 +295,16 @@ namespace SlideSCI
                     return result;
                 }
 
-                artifactKey = GetArtifactKey(box);
+                string previousKey = GetArtifactKey(box);
+                string previousBoxName = box.Name;
+                bool legacy = IsLegacyBoxName(box);
+                int sourceId;
+                TryGetSourcePictureId(box, out sourceId);
+                string finalBoxName = legacy ? BoxNamePrefix + sourceId.ToString(CultureInfo.InvariantCulture)
+                    + "_" + Guid.NewGuid().ToString("N").Substring(0, 8) : previousBoxName;
+                string finalKey = finalBoxName.Substring(BoxNamePrefix.Length);
+                artifactKey = "pending_" + Guid.NewGuid().ToString("N");
                 bool cleanedLegacy = false;
-                if (IsLegacyBoxName(box))
-                {
-                    // 旧版本选区框名不含 GUID：其残留物前缀为
-                    // SlideSCI_ZoomInset_<图片Id>_*，与新版 key 不同，清理永远匹配不上，
-                    // 导致每次重生成都叠加一层旧放大图/连线。升级时先整体清扫该图片的
-                    // 旧格式残留，再把选区框迁移到新版命名，之后按新 key 增量清理。
-                    if (TryGetSourcePictureId(box, out int legacyPictureId))
-                    {
-                        cleanedLegacy = CleanLegacyArtifacts(slide, legacyPictureId) > 0;
-                    }
-                    box.Name = BoxNamePrefix
-                        + (TryGetSourcePictureId(box, out int migratedPictureId)
-                            ? migratedPictureId.ToString(CultureInfo.InvariantCulture)
-                            : box.Id.ToString(CultureInfo.InvariantCulture))
-                        + "_" + Guid.NewGuid().ToString("N").Substring(0, 8);
-                    artifactKey = GetArtifactKey(box);
-                }
-                CleanUpPreviousArtifacts(slide, artifactKey);
 
                 PowerPoint.Shape duplicate = picture.Duplicate()[1];
                 duplicate.Name = MakeInsetName(artifactKey, "Picture");
@@ -324,29 +327,36 @@ namespace SlideSCI
                     return result;
                 }
 
+                PowerPoint.Shape draftPicture = duplicate;
+                try { ZoomNativeGeometry.ReplaceWithNativeSites(app, slide, ref box, ref duplicate); }
+                finally { try { draftPicture.Delete(); } catch { } }
+                box.Name = MakeInsetName(artifactKey, "Box");
                 box.Line.ForeColor.RGB = boxColorRgb;
                 box.Line.Weight = boxLineWeight;
-
-                AnchoredUnit boxUnit = CreateAnchoredUnit(slide, box, artifactKey,
-                    "BoxUnit", "BoxAnchor");
-                AnchoredUnit insetUnit = CreateAnchoredUnit(slide, duplicate, artifactKey,
-                    "InsetUnit", "InsetAnchor");
+                box.Line.DashStyle = boxDash;
+                AnchoredUnit boxUnit = CreateAnchoredUnit(box);
+                AnchoredUnit insetUnit = CreateAnchoredUnit(duplicate);
                 result.Created.Add(boxUnit.Group);
                 result.Created.Add(insetUnit.Group);
 
                 var lines = new List<PowerPoint.Shape>();
                 var endpoints = new List<Tuple<string, string>>();
-                if (lineStyle == ZoomLineStyle.JournalFunnel)
+                if (lineStyle != ZoomLineStyle.None)
                 {
-                    endpoints.Add(Tuple.Create("BL", "TL"));
-                    endpoints.Add(Tuple.Create("BR", "TR"));
-                }
-                else
-                {
-                    endpoints.Add(Tuple.Create("TL", "TR"));
-                    endpoints.Add(Tuple.Create("TR", "TL"));
-                    endpoints.Add(Tuple.Create("BL", "BR"));
-                    endpoints.Add(Tuple.Create("BR", "BL"));
+                    if (insetLeft >= picture.Left + picture.Width)
+                    { endpoints.Add(Tuple.Create("TR", "TL")); endpoints.Add(Tuple.Create("BR", "BL")); }
+                    else if (insetLeft + targetWidth <= picture.Left)
+                    { endpoints.Add(Tuple.Create("TL", "TR")); endpoints.Add(Tuple.Create("BL", "BR")); }
+                    else if (insetTop + targetHeight <= picture.Top)
+                    { endpoints.Add(Tuple.Create("TL", "BL")); endpoints.Add(Tuple.Create("TR", "BR")); }
+                    else
+                    { endpoints.Add(Tuple.Create("BL", "TL")); endpoints.Add(Tuple.Create("BR", "TR")); }
+                    if (lineStyle == ZoomLineStyle.CrossedX)
+                    {
+                        string firstTarget = endpoints[0].Item2;
+                        endpoints[0] = Tuple.Create(endpoints[0].Item1, endpoints[1].Item2);
+                        endpoints[1] = Tuple.Create(endpoints[1].Item1, firstTarget);
+                    }
                 }
 
                 int lineIndex = 0;
@@ -377,6 +387,16 @@ namespace SlideSCI
                     SelectShapes(app, slide, names.ToArray());
                 }
 
+                // Commit only after the replacement and native connections exist.
+                CleanUpPreviousArtifacts(slide, previousKey);
+                if (legacy) cleanedLegacy = CleanLegacyArtifacts(slide, sourceId) > 0;
+                foreach (PowerPoint.Shape oldShape in CollectAllShapes(slide))
+                    if (oldShape.Name == previousBoxName) { oldShape.Delete(); break; }
+                string pendingPrefix = InsetNamePrefix + artifactKey + "_";
+                foreach (PowerPoint.Shape created in CollectAllShapes(slide))
+                    if (created.Name.StartsWith(pendingPrefix, StringComparison.Ordinal))
+                        created.Name = InsetNamePrefix + finalKey + "_" + created.Name.Substring(pendingPrefix.Length);
+                box.Name = finalBoxName;
                 result.Warning = placementWarning;
                 if (!result.Glued)
                 {
@@ -561,56 +581,15 @@ namespace SlideSCI
                 top + height <= slideHeight - SlideMarginPoints;
         }
 
-        private static AnchoredUnit CreateAnchoredUnit(PowerPoint.Slide slide,
-            PowerPoint.Shape content, string artifactKey, string unitSuffix, string anchorPrefix)
+        private static AnchoredUnit CreateAnchoredUnit(PowerPoint.Shape content)
         {
             var targets = new Dictionary<string, AnchorTarget>(StringComparer.Ordinal);
-            var names = new List<string> { content.Name };
             foreach (string tag in new[] { "TL", "TR", "BL", "BR" })
             {
                 GetCorner(content, tag, out float x, out float y);
-                PowerPoint.Shape socket = CreateSocket(slide, x, y, artifactKey, anchorPrefix, tag);
-                names.Add(socket.Name);
-                targets[tag] = new AnchorTarget(socket, x, y);
+                targets[tag] = new AnchorTarget(content, x, y);
             }
-
-            PowerPoint.Shape group = slide.Shapes.Range(names.ToArray()).Group();
-            group.Name = MakeInsetName(artifactKey, unitSuffix);
-
-            var groupedTargets = new Dictionary<string, AnchorTarget>(StringComparer.Ordinal);
-            foreach (PowerPoint.Shape child in group.GroupItems)
-            {
-                foreach (KeyValuePair<string, AnchorTarget> pair in targets)
-                {
-                    if (string.Equals(child.Name, pair.Value.Shape.Name, StringComparison.Ordinal))
-                    {
-                        groupedTargets[pair.Key] = new AnchorTarget(child, pair.Value.X, pair.Value.Y);
-                        break;
-                    }
-                }
-            }
-
-            foreach (KeyValuePair<string, AnchorTarget> pair in targets)
-            {
-                if (!groupedTargets.ContainsKey(pair.Key)) groupedTargets[pair.Key] = pair.Value;
-            }
-            return new AnchoredUnit(group, groupedTargets);
-        }
-
-        private static PowerPoint.Shape CreateSocket(PowerPoint.Slide slide,
-            float targetX, float targetY, string artifactKey, string prefix, string tag)
-        {
-            bool leftCorner = tag.EndsWith("L", StringComparison.Ordinal);
-            float left = leftCorner ? targetX : targetX - SocketSizePoints;
-            float top = targetY - SocketSizePoints / 2f;
-            PowerPoint.Shape socket = slide.Shapes.AddShape(MsoAutoShapeType.msoShapeRectangle,
-                left, top, SocketSizePoints, SocketSizePoints);
-            socket.Name = MakeInsetName(artifactKey, prefix + "_" + tag);
-            socket.Fill.Visible = MsoTriState.msoTrue;
-            socket.Fill.ForeColor.RGB = 0xFFFFFF;
-            socket.Fill.Transparency = 1f;
-            socket.Line.Visible = MsoTriState.msoFalse;
-            return socket;
+            return new AnchoredUnit(content, targets);
         }
 
         private static PowerPoint.Shape CreateLine(PowerPoint.Slide slide,

@@ -63,7 +63,7 @@ namespace SlideSCI
             this.pictureWidth = pictureWidth;
             this.pictureHeight = pictureHeight;
 
-            ZoomSettings s = initial ?? ZoomSettings.CreateDefault();
+            ZoomSettings s = (initial ?? ZoomSettings.CreateDefault()).NormalizedCopy();
 
             Text = "局部放大设置";
             FormBorderStyle = FormBorderStyle.FixedDialog;

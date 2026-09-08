@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Text;
@@ -6309,14 +6309,16 @@ namespace SlideSCI
                     return;
                 }
 
-                if (!TryParseFloat(zoomBoxPercentCombo.Text, out float percent) || percent <= 0)
+                if (!TryParseFloat(zoomBoxPercentCombo.Text, out float percent) || float.IsNaN(percent) || float.IsInfinity(percent) || percent < 5 || percent > 90)
                 {
-                    percent = 40f;
+                    MessageBox.Show("选区大小请输入 5–90。", "局部放大");
+                    return;
                 }
-                percent = Math.Max(5f, Math.Min(90f, percent));
 
                 try { app.StartNewUndoEntry(); } catch { }
-                Shape box = ZoomInsetHelper.InsertZoomBox(slide, picture, percent);
+                Shape box = ZoomInsetHelper.InsertZoomBox(slide, picture, percent, zoomRibbonSettings.BoxLineWeight);
+                box.Line.ForeColor.RGB = zoomRibbonSettings.BoxColorRgb;
+                box.Line.DashStyle = ZoomSettings.GetDashStyle(zoomRibbonSettings.BoxLineDash);
                 SelectMultipleShapes(new List<Shape> { box });
             }
             catch (Exception ex)
@@ -6327,14 +6329,12 @@ namespace SlideSCI
 
         /// <summary>
         /// 步骤二：生成放大图。
-        /// 单击 = 按上次保存的设置直接生成/更新当前选区（首次使用时自动打开设置）；
-        /// Ctrl+单击 = 打开「局部放大设置」对话框，调整后生成并记住设置。
+        /// 按 Ribbon 当前参数直接生成或更新当前选区。
         /// </summary>
         private void btnGenerateZoomInset_Click(object sender, RibbonControlEventArgs e)
         {
             try
             {
-                bool openSettings = (Control.ModifierKeys & Keys.Control) != 0;
 
                 if (!TryGetActiveSlide(out Slide slide))
                 {
@@ -6357,34 +6357,10 @@ namespace SlideSCI
                     return;
                 }
 
-                ZoomSettings settings = ZoomSettings.LoadOrDefault();
-                if (openSettings || !ZoomSettings.HasSavedSettings())
-                {
-                    using (var dialog = new ZoomInsetForm(box.Width, box.Height, picture.Width, picture.Height, settings))
-                    {
-                        IWin32Window owner = PowerPointContext.GetDialogOwner(app);
-                        DialogResult dialogResult = owner == null
-                            ? dialog.ShowDialog()
-                            : dialog.ShowDialog(owner);
-                        if (dialogResult != DialogResult.OK) return;
-
-                        settings = new ZoomSettings
-                        {
-                            TargetMode = dialog.TargetMode,
-                            Magnification = dialog.Magnification,
-                            CustomWidthCm = dialog.CustomWidthCm,
-                            GapCm = dialog.GapCm,
-                            LineStyle = dialog.LineStyle,
-                            LineWeight = dialog.LineWeight,
-                            BoxLineWeight = dialog.BoxLineWeight,
-                            LineColorRgb = dialog.LineColorRgb,
-                            BoxColorRgb = dialog.BoxColorRgb,
-                            LineDash = dialog.LineDashStyle == Office.MsoLineDashStyle.msoLineDash ? 1 : 0,
-                            Group = dialog.GroupEnabled
-                        };
-                        ZoomSettings.Save(settings);
-                    }
-                }
+                ZoomSettings settings = ReadZoomRibbonSettings();
+                if (settings == null) return;
+                if (!ZoomSettings.Save(settings))
+                    MessageBox.Show("设置未能保存，本次仍使用当前参数。", "局部放大");
 
                 try { app.StartNewUndoEntry(); } catch { }
                 ZoomInsetResult result = ApplyZoomSettings(slide, box, picture, settings, app);
@@ -6423,9 +6399,9 @@ namespace SlideSCI
                 settings.BoxLineWeight,
                 settings.LineColorRgb,
                 settings.BoxColorRgb,
-                settings.LineDash == 1 ? Office.MsoLineDashStyle.msoLineDash : Office.MsoLineDashStyle.msoLineSolid,
+                ZoomSettings.GetDashStyle(settings.LineDash),
                 settings.Group,
-                app);
+                app, ZoomSettings.GetDashStyle(settings.BoxLineDash));
         }
     }
 }

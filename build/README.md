@@ -1,5 +1,19 @@
 # 构建 SlideSCI Focus VSTO 安装包
 
+## 每轮改进必须发布
+
+任何修改源代码、项目配置、测试、文档、构建脚本或版本信息的改进回合，都必须递增版本、运行回归、生成新的 Release 和 Inno 安装包，并把本轮 commit 推送到 GitHub 后才能交付。不要只给出构建命令或留下未推送的本地修改；根目录 [`AGENTS.md`](../AGENTS.md) 是代理执行这条规则时的必读说明。
+
+推荐的最小闭环是：
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Build-Installer.ps1 -Configuration Release
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Run-CoreRegression.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\build\Build-InnoInstaller.ps1
+```
+
+打包完成后，记录 `artifacts\inno\SlideSCI-Focus-<版本>-Setup.exe` 的绝对路径、大小、SHA-256 和签名性质，再选择性提交并推送到已经核对的 GitHub 远程。安装包来自 `SlideSCI\bin\Release`；不要把旧的 `artifacts` 输出或 ClickOnce 中间目录当作本轮交付物。
+
 在仓库根目录运行：
 
 ```powershell

@@ -68,23 +68,35 @@ namespace SlideSCI
                             $"3. 安装完成后重启 PowerPoint");
                     }
 
-                    using (var writer = new StreamWriter(process.StandardInput.BaseStream, Encoding.UTF8))
-                    {
-                        writer.Write(latexCode);
-                        writer.Flush();
-                    }
-
-                    // Read both streams concurrently so a verbose Node process
-                    // cannot deadlock on a full stderr buffer.
+                    // Drain output before writing input: either pipe can fill while
+                    // the child is still starting up or reporting a dependency error.
                     Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
                     Task<string> errorTask = process.StandardError.ReadToEndAsync();
-
-                    if (!process.WaitForExit((int)ConversionTimeout.TotalMilliseconds))
+                    Task inputTask = Task.Run(async () =>
                     {
-                        try { process.Kill(); } catch { }
-                        throw new InvalidOperationException("LaTeX 转换超时（超过 60 秒），已终止 Node.js 进程。");
+                        using (var writer = new StreamWriter(process.StandardInput.BaseStream, new UTF8Encoding(false)))
+                        {
+                            await writer.WriteAsync(latexCode).ConfigureAwait(false);
+                        }
+                    });
+
+                    // Apply one deadline to input, output and process exit together.
+                    Task completion = Task.WhenAll(inputTask, outputTask, errorTask,
+                        Task.Run(() => process.WaitForExit()));
+                    if (Task.WhenAny(completion, Task.Delay(ConversionTimeout)).GetAwaiter().GetResult() != completion)
+                    {
+                        try { process.Kill(); } catch (Exception ex) { Trace.TraceWarning("Node.js termination failed: {0}", ex.Message); }
+                        // Observe faults from pipe operations interrupted by termination.
+                        completion.ContinueWith(task => { var ignored = task.Exception; },
+                            TaskContinuationOptions.OnlyOnFaulted);
+                        throw new InvalidOperationException("LaTeX 转换超时（超过 60 秒），已请求终止 Node.js 进程。");
                     }
 
+                    // Observe the aggregate even when stdin closed early; retain the
+                    // child's diagnostic below instead of replacing it with a pipe error.
+                    Exception ioError = null;
+                    try { completion.GetAwaiter().GetResult(); }
+                    catch (Exception ex) { ioError = ex; }
                     string output = outputTask.GetAwaiter().GetResult();
                     string error = errorTask.GetAwaiter().GetResult();
 
@@ -112,6 +124,11 @@ namespace SlideSCI
                             }
                         }
                         throw new InvalidOperationException(message);
+                    }
+
+                    if (ioError != null)
+                    {
+                        throw new InvalidOperationException("LaTeX 转换进程通信失败。", ioError);
                     }
 
                     if (string.IsNullOrWhiteSpace(output))

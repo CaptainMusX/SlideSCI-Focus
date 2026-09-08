@@ -168,7 +168,7 @@ function Ensure-LocalSigningMaterial
 }
 
 $nodePath = Get-RequiredCommandPath "node.exe"
-$npmPath = Get-RequiredCommandPath "npm"
+$npmPath = Get-RequiredCommandPath "npm.cmd"
 $msbuild = Find-MSBuild
 $snPath = Find-StrongNameTool
 $signing = Ensure-LocalSigningMaterial

@@ -1,4 +1,4 @@
-namespace SlideSCI
+﻿namespace SlideSCI
 {
     partial class Ribbon1 : Microsoft.Office.Tools.Ribbon.RibbonBase
     {
@@ -11,6 +11,7 @@ namespace SlideSCI
             : base(Globals.Factory.GetRibbonFactory())
         {
             InitializeComponent();
+            InitializeZoomRibbon();
         }
 
         /// <summary> 
@@ -320,6 +321,7 @@ namespace SlideSCI
             this.imgAutoAlign_colNum.Items.Add(ribbonDropDownItemImpl20);
             this.imgAutoAlign_colNum.Label = "列数量";
             this.imgAutoAlign_colNum.Name = "imgAutoAlign_colNum";
+            this.imgAutoAlign_colNum.SizeString = "000000";
             this.imgAutoAlign_colNum.Text = null;
             this.imgAutoAlign_colNum.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgAutoAlign_colNum_TextChanged);
             // 
@@ -327,6 +329,7 @@ namespace SlideSCI
             // 
             this.imgAutoAlign_colSpace.Label = "列间距";
             this.imgAutoAlign_colSpace.Name = "imgAutoAlign_colSpace";
+            this.imgAutoAlign_colSpace.SizeString = "000000";
             this.imgAutoAlign_colSpace.Text = null;
             this.imgAutoAlign_colSpace.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgAutoAlign_colSpace_TextChanged);
             // 
@@ -335,6 +338,7 @@ namespace SlideSCI
             this.imgAutoAlign_rowSpace.Label = "行间距";
             this.imgAutoAlign_rowSpace.Name = "imgAutoAlign_rowSpace";
             this.imgAutoAlign_rowSpace.ScreenTip = "行间距变动，会自动调整标题字号";
+            this.imgAutoAlign_rowSpace.SizeString = "000000";
             this.imgAutoAlign_rowSpace.Text = null;
             this.imgAutoAlign_rowSpace.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgAutoAlign_rowSpace_TextChanged);
             // 
@@ -383,6 +387,7 @@ namespace SlideSCI
             this.imgWidthEditBpx.Label = "图宽(cm)";
             this.imgWidthEditBpx.Name = "imgWidthEditBpx";
             this.imgWidthEditBpx.ScreenTip = "统一设置图片宽度cm";
+            this.imgWidthEditBpx.SizeString = "000000";
             this.imgWidthEditBpx.Text = null;
             this.imgWidthEditBpx.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgWidthEditBpx_TextChanged);
             // 
@@ -431,6 +436,7 @@ namespace SlideSCI
             this.imgHeightEditBox.Label = "图高(cm)";
             this.imgHeightEditBox.Name = "imgHeightEditBox";
             this.imgHeightEditBox.ScreenTip = "统一设置图片高度cm";
+            this.imgHeightEditBox.SizeString = "000000";
             this.imgHeightEditBox.Text = null;
             this.imgHeightEditBox.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgHeightEditBox_TextChanged);
             // 
