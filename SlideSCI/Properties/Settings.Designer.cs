@@ -25,6 +25,30 @@ namespace SlideSCI.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public string TitleOffsetX {
+            get { return (string)this["TitleOffsetX"]; }
+            set { this["TitleOffsetX"] = value; }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("0")]
+        public string TitleOffsetY {
+            get { return (string)this["TitleOffsetY"]; }
+            set { this["TitleOffsetY"] = value; }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("-1")]
+        public int TitleAlignment {
+            get { return (int)this["TitleAlignment"]; }
+            set { this["TitleAlignment"] = value; }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("微软雅黑")]
         public string TitleFontName {
             get {

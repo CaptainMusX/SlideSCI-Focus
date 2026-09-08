@@ -12,6 +12,7 @@
         {
             InitializeComponent();
             InitializeZoomRibbon();
+            InitializeTitleRibbon();
         }
 
         /// <summary> 
@@ -129,8 +130,7 @@
             this.fontSizeEditBox = this.Factory.CreateRibbonComboBox();
             this.distanceFromBottomEditBox = this.Factory.CreateRibbonComboBox();
             this.titleTextEditBox = this.Factory.CreateRibbonEditBox();
-            this.autoGroupCheckBox = this.Factory.CreateRibbonCheckBox();
-            this.titleCenterCheckbox = this.Factory.CreateRibbonCheckBox();
+            this.autoGroupCheckBox = this.Factory.CreateRibbonToggleButton();
             this.group1 = this.Factory.CreateRibbonGroup();
             this.labelFontSizeEditBox = this.Factory.CreateRibbonComboBox();
             this.labelFontNameEditBox = this.Factory.CreateRibbonComboBox();
@@ -486,7 +486,6 @@
             this.图片处理.Items.Add(this.distanceFromBottomEditBox);
             this.图片处理.Items.Add(this.titleTextEditBox);
             this.图片处理.Items.Add(this.autoGroupCheckBox);
-            this.图片处理.Items.Add(this.titleCenterCheckbox);
             this.图片处理.Label = "添加图片标题";
             this.图片处理.Name = "图片处理";
             // 
@@ -521,10 +520,7 @@
             this.autoGroupCheckBox.Name = "autoGroupCheckBox";
             this.autoGroupCheckBox.ScreenTip = "自动编组，且编组后自动选中";
             // 
-            // titleCenterCheckbox
             // 
-            this.titleCenterCheckbox.Label = "是否居中";
-            this.titleCenterCheckbox.Name = "titleCenterCheckbox";
             // 
             // group1
             // 
@@ -1288,7 +1284,7 @@
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup 图片处理;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton AddTitleButton;
         internal Microsoft.Office.Tools.Ribbon.RibbonEditBox titleTextEditBox;
-        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox autoGroupCheckBox;
+        internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton autoGroupCheckBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton addLabelsButton;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox labelTemplateComboBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonDropDown imgAutoAlignSortTypeDropDown;
@@ -1379,7 +1375,6 @@
         internal Microsoft.Office.Tools.Ribbon.RibbonButton 复制大图;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton 导出原图;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton 图片上标题;
-        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox titleCenterCheckbox;
         internal Microsoft.Office.Tools.Ribbon.RibbonEditBox labelIndex;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton updateLabelsButton;
         internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox labelIndexUpdatecheckBox;

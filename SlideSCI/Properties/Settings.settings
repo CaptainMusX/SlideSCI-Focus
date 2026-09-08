@@ -80,5 +80,14 @@
     <Setting Name="selectedCodeLanguage" Type="System.String" Scope="User">
       <Value Profile="(Default)">matlab</Value>
     </Setting>
+    <Setting Name="TitleOffsetX" Type="System.String" Scope="User">
+      <Value Profile="(Default)">0</Value>
+    </Setting>
+    <Setting Name="TitleOffsetY" Type="System.String" Scope="User">
+      <Value Profile="(Default)">0</Value>
+    </Setting>
+    <Setting Name="TitleAlignment" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">-1</Value>
+    </Setting>
   </Settings>
 </SettingsFile>

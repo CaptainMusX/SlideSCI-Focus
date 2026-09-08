@@ -220,7 +220,8 @@ namespace SlideSCI
             // Load Image Title Settings
             fontNameEditBox.Text = Properties.Settings.Default.TitleFontName;
             fontSizeEditBox.Text = Properties.Settings.Default.TitleFontSize;
-            distanceFromBottomEditBox.Text = Properties.Settings.Default.TitleDistanceFromBottom;
+            distanceFromBottomEditBox.Text = Properties.Settings.Default.TitleOffsetY;
+            titleOffsetXCombo.Text = Properties.Settings.Default.TitleOffsetX;
             titleTextEditBox.Text = Properties.Settings.Default.TitleText;
             autoGroupCheckBox.Checked = Properties.Settings.Default.AutoGroup;
 
@@ -249,7 +250,8 @@ namespace SlideSCI
                 .Default
                 .imgAutoAlignAlignType;
             excludeTextcheckBox.Checked = Properties.Settings.Default.imgAutoAlighExcludeText;
-            titleCenterCheckbox.Checked = Properties.Settings.Default.imgAddTitleCenter;
+            SetTitleAlignment(Properties.Settings.Default.TitleAlignment < 0
+                ? (Properties.Settings.Default.imgAddTitleCenter ? 1 : 0) : Properties.Settings.Default.TitleAlignment);
             // insertMarkdown
             toggleBackgroundCheckBox.Checked = Properties.Settings.Default.ToggleBackground;
 
@@ -274,7 +276,7 @@ namespace SlideSCI
             imgHeightEditBox.TextChanged += SaveSettings;
             imgAutoAlignAlignTypeDropDown.SelectionChanged += SaveSettings;
             excludeTextcheckBox.Click += SaveSettings;
-            titleCenterCheckbox.Click += SaveSettings;
+            titleOffsetXCombo.TextChanged += SaveSettings;
             labelBoldcheckBox.Click += SaveSettings;
 
             toggleBackgroundCheckBox.Click += SaveSettings;
@@ -426,44 +428,8 @@ namespace SlideSCI
             FreshCombobox(imgWidthEditBpx, PicSizes);
             FreshCombobox(imgHeightEditBox, PicSizes);
             //图下距离
-            List<string> PicDistance = new List<string>()
-            {
-                "0",
-                "1",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "10",
-                "11",
-                "12",
-                "13",
-                "14",
-                "15",
-                "20",
-                "25",
-                "30",
-                "35",
-                "40",
-                "45",
-                "50",
-                "55",
-                "60",
-                "65",
-                "70",
-                "75",
-                "80",
-                "90",
-                "100",
-                "120",
-                "150",
-                "200",
-                "500",
-            };
-            FreshCombobox(distanceFromBottomEditBox, PicDistance);
+            FreshCombobox(distanceFromBottomEditBox, new List<string> { "-20", "-10", "-5", "0", "5", "10", "20" });
+            FreshCombobox(titleOffsetXCombo, new List<string> { "-20", "-10", "-5", "0", "5", "10", "20" });
             //XY偏移
             List<string> OffsetValues = new List<string>()
             {
@@ -628,7 +594,8 @@ namespace SlideSCI
             // Save Image Title Settings
             Properties.Settings.Default.TitleFontName = fontNameEditBox.Text;
             Properties.Settings.Default.TitleFontSize = fontSizeEditBox.Text;
-            Properties.Settings.Default.TitleDistanceFromBottom = distanceFromBottomEditBox.Text;
+            Properties.Settings.Default.TitleOffsetY = distanceFromBottomEditBox.Text;
+            Properties.Settings.Default.TitleOffsetX = titleOffsetXCombo.Text;
             Properties.Settings.Default.TitleText = titleTextEditBox.Text;
             Properties.Settings.Default.AutoGroup = autoGroupCheckBox.Checked;
 
@@ -650,7 +617,7 @@ namespace SlideSCI
             Properties.Settings.Default.imgAutoAlignAlignType =
                 imgAutoAlignAlignTypeDropDown.SelectedItemIndex;
             Properties.Settings.Default.imgAutoAlighExcludeText = excludeTextcheckBox.Checked;
-            Properties.Settings.Default.imgAddTitleCenter = titleCenterCheckbox.Checked;
+            Properties.Settings.Default.TitleAlignment = titleAlignmentIndex;
             // Save insertMarkdwon
             Properties.Settings.Default.ToggleBackground = toggleBackgroundCheckBox.Checked;
 
@@ -711,167 +678,8 @@ namespace SlideSCI
     /// <param name="isBottomTitle">true为下标题，false为上标题</param>
     private void AddTitleFun(bool isBottomTitle = true)
     {
-        if (!TryGetActiveSlide(out Slide slide))
-        {
-            MessageBox.Show("请先打开演示文稿并切换到普通幻灯片视图。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        if (!PowerPointContext.TryGetActiveSelection(app, out Selection sel))
-        {
-            MessageBox.Show("无法读取当前选择。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        bool autoGroup = autoGroupCheckBox.Checked; // 自动编组
-        List<ShapeRange> allshapesName = new List<ShapeRange>(); // 需要编组的对象集合
-        List<Shape> allshapes = new List<Shape>(); // 编组后的对象
-
-        if (sel.Type == PpSelectionType.ppSelectionShapes)
-        {
-            if (!TryParseFloat(fontSizeEditBox.Text, out float fontSize) || fontSize <= 0)
-            {
-                MessageBox.Show("请输入有效的字体大小。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            if (!TryParseFloat(distanceFromBottomEditBox.Text, out float distanceFromBottom))
-            {
-                MessageBox.Show("请输入有效的图片标题间距。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            string fontName = fontNameEditBox.Text; // 字体名称
-            string titleText = titleTextEditBox.Text; // 标题文本
-            int count = 1;
-            float tolerance = 10f; // 通常图片排列错位容差，10就够用
-            ShapeRange sortedSelection = GetSortedSelection(sel, tolerance);
-            var selectedImgShape = new List<Shape>();
-
-            foreach (Shape shape in (sortedSelection ?? sel.ShapeRange))
-            {
-                selectedImgShape.Add(shape);
-            }
-
-            foreach (Shape selectedShape in selectedImgShape)
-            {
-                try
-                {
-                    // 根据参数决定标题位置
-                    float titleTop;
-                    if (isBottomTitle)
-                    {
-                        // 下标题：图片底部 + 距离
-                        titleTop = selectedShape.Top + selectedShape.Height + distanceFromBottom;
-                    }
-                    else
-                    {
-                        // 上标题：图片顶部 - 标题高度 - 距离
-                        titleTop = selectedShape.Top - (fontSize * 2) - distanceFromBottom;
-                    }
-
-                    Shape titleShape = slide.Shapes.AddTextbox(
-                        Office.MsoTextOrientation.msoTextOrientationHorizontal,
-                        selectedShape.Left,
-                        titleTop,
-                        selectedShape.Width,
-                        fontSize * 2
-                    );
-
-                    // 设置标题文本和格式
-                    titleShape.TextFrame.TextRange.Text = titleText;
-                    titleShape.TextFrame.TextRange.Font.Size = fontSize;
-                    titleShape.TextFrame.TextRange.Font.NameFarEast = fontName; // Ensure FarEast font is set
-                    titleShape.TextFrame.TextRange.Font.Name = fontName; // Ensure font is set
-                    // 标题是否居中
-                    if (titleCenterCheckbox.Checked)
-                    {
-                        titleShape.TextFrame.TextRange.ParagraphFormat.Alignment = PpParagraphAlignment.ppAlignCenter;
-                    }
-                    else{
-                        titleShape.TextFrame.TextRange.ParagraphFormat.Alignment = PpParagraphAlignment.ppAlignLeft;
-
-                    }
-
-
-                    // 形状中的文字是否自动换行
-                    titleShape.TextFrame.WordWrap = Office.MsoTriState.msoTrue;
-                    // 自动调整文本框大小
-                    titleShape.TextFrame.AutoSize = PpAutoSize.ppAutoSizeShapeToFitText;
-
-                    // 设置文本框宽度
-                    titleShape.Width = selectedShape.Width;
-                    titleShape.Left = selectedShape.Left; // 设置文本框左对齐
-
-                    allshapesName.Add(
-                        slide.Shapes.Range(new string[] { selectedShape.Name, titleShape.Name })
-                    );
-
-                    // 自动选择
-                    if (count == 1)
-                    {
-                        titleShape.Select(Office.MsoTriState.msoTrue);
-                    }
-                    else
-                    {
-                        titleShape.Select(Office.MsoTriState.msoFalse);
-                    }
-                    count++;
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(
-                        $"为对象 '{selectedShape.Name}' 添加标题时出错: {ex.Message}"
-                    );
-                    continue; // 继续处理下一个对象
-                }
-            }
-
-            if (selectedImgShape.Count == 0)
-            {
-                MessageBox.Show("请选择要添加标题的对象。");
-                return;
-            }
-        }
-        else
-        {
-            MessageBox.Show("请选择要添加标题的对象。");
-        }
-
-        // 自动编组
-        if (autoGroup)
-        {
-            foreach (var shapeRange2 in allshapesName)
-            {
-                Shape GroupObj;
-                try
-                {
-                    GroupObj = shapeRange2.Group();
-                    allshapes.Add(GroupObj);
-                    SelectMultipleShapes(allshapes);
-                }
-                catch
-                {
-                    try
-                    {
-                        shapeRange2.Copy();
-                        shapeRange2.Delete();
-
-                        ShapeRange pastedShapes = slide.Shapes.Paste();
-
-                        GroupObj = pastedShapes.Group();
-                        allshapes.Add(GroupObj);
-                        SelectMultipleShapes(allshapes);
-                    }
-                    catch (Exception innerEx)
-                    {
-                        MessageBox.Show($"编组失败：{innerEx.Message}");
-                        continue;
-                    }
-                }
-        }
+        AddPictureTitles(isBottomTitle ? PictureTitleSide.Bottom : PictureTitleSide.Top);
     }
-}
 
         private void App_WindowSelectionChange(Selection Sel)
         {
