@@ -39,3 +39,11 @@ v2.0.6 安装包：F:\SlideSCI\artifacts\inno\SlideSCI-Focus-2.0.6.0-Setup.exe�
 - 第三行使用与偏移相同的字号宽度，`TitleWideSize` 按第三行总宽度设置为上方两行的共同宽度。
 
 v2.0.7 安装包：F:\SlideSCI\artifacts\inno\SlideSCI-Focus-2.0.7.0-Setup.exe。
+
+## v2.0.8 真实渲染修正
+
+- 第三列的“字号、编组、对齐方式”水平行直接作为第三列垂直盒的第三个子项（单层嵌套）。此前包裹它的垂直槽（titleFormattingRowSlot）在真实 PowerPoint 中被当成新的一列，导致该行外溢成第四列；去掉该槽后，序列化 Ribbon 顶层仍固定为三列，第三行保持在第三列内。
+- 宽度基准不变：字号输入与上下/左右偏移同为窄宽度 `00`，标题/字体输入统一使用 `TitleWideSize`（按第三行“字号+编组+对齐方式”合计宽度设定的同一加宽值），两行输入框类型、宽度、高度一致，左右对齐。
+- 布局回归测试新增断言：第三列内不再存在垂直包装盒，顶层仍为三个 box。
+
+v2.0.8 安装包：F:\SlideSCI\artifacts\inno\SlideSCI-Focus-2.0.8.0-Setup.exe。

@@ -46,9 +46,11 @@ namespace SlideSCI
             图片处理.Items.Add(horizontal);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleHorizontalSeparator"));
 
-            // The third column is one vertical layout item. The row below is
-            // deliberately nested here; adding its controls directly to the
-            // group would create a fourth column in Office.
+            // The third column is one vertical layout item. Its three rows are
+            // 标题, 字体, and the horizontal row 字号+编组+对齐方式. The horizontal
+            // row stays a direct child of this column (single nesting level):
+            // wrapping it in another vertical slot makes PowerPoint render it as
+            // a new column, turning the group into four columns.
             titleTextEditBox.SizeString = TitleWideSize;
             fontNameEditBox.Label = "字体"; fontNameEditBox.SizeString = TitleWideSize;
             var format = Factory.CreateRibbonBox(); format.BoxStyle = RibbonBoxStyle.Vertical;
@@ -78,10 +80,7 @@ namespace SlideSCI
             }
             SetTitleAlignment(1);
             row.Items.Add(titleAlignmentMenu);
-            var rowSlot = Factory.CreateRibbonBox(); rowSlot.BoxStyle = RibbonBoxStyle.Vertical;
-            rowSlot.Name = "titleFormattingRowSlot";
-            rowSlot.Items.Add(row);
-            format.Items.Add(rowSlot);
+            format.Items.Add(row);
             图片处理.Items.Add(format);
         }
 

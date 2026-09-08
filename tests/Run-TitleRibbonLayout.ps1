@@ -24,7 +24,10 @@ for($i=0;$i -lt 2;$i++) {
 }
 $format=$group.Items[4]
 Check ($format.BoxStyle.ToString() -eq 'Vertical' -and $format.Items.Count -eq 3) 'third column is one vertical container'
-$title=$format.Items[0]; $font=$format.Items[1]; $rowSlot=$format.Items[2]; $row=$rowSlot.Items[0]
+# The third row (字号+编组+对齐方式) must stay a direct child of the third
+# column. A wrapper slot makes PowerPoint treat it as a fourth column.
+$title=$format.Items[0]; $font=$format.Items[1]; $row=$format.Items[2]
+Check ($row.Name -eq 'titleFormattingRow' -and $row.BoxStyle.ToString() -eq 'Horizontal') 'third row is the direct horizontal child of the third column'
 Check ($title.GetType() -eq $font.GetType() -and $title.SizeString -eq $font.SizeString) 'same native type and size for wide inputs'
 Check ($title.Label.Length -eq $font.Label.Length) 'wide input labels align'
 Check ($row.Items.Count -eq 3 -and $row.BoxStyle.ToString() -eq 'Horizontal') 'single horizontal third row'
@@ -37,6 +40,9 @@ $writer=[Activator]::CreateInstance($writerType,$flags,$null,@('Microsoft.PowerP
 $ns=[Xml.XmlNamespaceManager]::new($xml.NameTable); $ns.AddNamespace('r',$xml.DocumentElement.NamespaceURI)
 $actual=$xml.SelectSingleNode('//r:group[@id="图片处理"]',$ns)
 Check ($actual.SelectNodes('./r:comboBox',$ns).Count -eq 0 -and $actual.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized group keeps three top-level columns'
+$formatBox=$actual.SelectNodes('./r:box',$ns).Item(2)
+$checkRow=$formatBox.SelectNodes('./r:box[@boxStyle="horizontal"]',$ns)
+Check ($checkRow.Count -eq 1 -and $formatBox.SelectNodes('./r:box[@boxStyle="vertical"]',$ns).Count -eq 0) 'no extra vertical wrapper inside the third column (row must not become a fourth column)'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
 if($CreatePreview) {
  $controls=@{}
