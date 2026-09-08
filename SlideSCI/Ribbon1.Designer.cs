@@ -132,7 +132,7 @@
             this.zoomBoxPercentCombo = this.Factory.CreateRibbonComboBox();
             this.图片处理 = this.Factory.CreateRibbonGroup();
             this.fontNameEditBox = this.Factory.CreateRibbonComboBox();
-            this.fontSizeEditBox = this.Factory.CreateRibbonEditBox();
+            this.fontSizeEditBox = this.Factory.CreateRibbonComboBox();
             this.distanceFromBottomEditBox = this.Factory.CreateRibbonComboBox();
             this.titleTextEditBox = this.Factory.CreateRibbonComboBox();
             this.autoGroupCheckBox = this.Factory.CreateRibbonToggleButton();
@@ -502,7 +502,7 @@
             // 
             // fontSizeEditBox
             // 
-            this.fontSizeEditBox.Label = "字体号";
+            this.fontSizeEditBox.Label = "字号";
             this.fontSizeEditBox.Name = "fontSizeEditBox";
             this.fontSizeEditBox.Text = null;
             // 
@@ -1301,7 +1301,7 @@
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox imgAutoAlign_colNum;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox imgAutoAlign_colSpace;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox labelFontSizeEditBox;
-        internal Microsoft.Office.Tools.Ribbon.RibbonEditBox fontSizeEditBox;
+        internal Microsoft.Office.Tools.Ribbon.RibbonComboBox fontSizeEditBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox distanceFromBottomEditBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox fontNameEditBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox labelFontNameEditBox;

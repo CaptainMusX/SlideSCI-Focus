@@ -11,9 +11,10 @@ namespace SlideSCI
     {
         private const string TitleNumberSize = "00";
         private const string TitleWideSize = "00000000000000";
+        private const int TitleHistoryLimit = 5;
+        private const char TitleHistorySeparator = '\n';
         private RibbonComboBox titleOffsetXCombo;
         private RibbonMenu titleAlignmentMenu;
-        private RibbonMenu titleFontSizeMenu;
         private static readonly string[] TitleFontSizePresets =
         {
             "2", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "18", "20", "22", "24", "26", "28", "30", "40", "50", "60", "80", "100", "120", "150", "200"
@@ -51,18 +52,25 @@ namespace SlideSCI
             图片处理.Items.Add(horizontal);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleHorizontalSeparator"));
 
-            // 第三列：标题 / 字体 / 字号、编组与对齐方式。
+            // 第三列：标题 / 字体 / 字号，每行一个 ComboBox。
+            // 与“图片自动排列”的“列数量”列保持相同结构，避免横向盒造成行高不一致。
+            titleTextEditBox.Label = "标题";
             titleTextEditBox.SizeString = TitleWideSize;
+            titleTextEditBox.ScreenTip = "标题文字";
+            titleTextEditBox.SuperTip = "可直接输入，也可从下拉列表选择最近生成的标题。";
             fontNameEditBox.Label = "字体"; fontNameEditBox.SizeString = TitleWideSize;
             fontSizeEditBox.Label = "字号"; fontSizeEditBox.SizeString = TitleNumberSize;
+            fontSizeEditBox.ScreenTip = "标题字号 (pt)";
+            fontSizeEditBox.SuperTip = "可直接输入字号，也可从下拉列表选择预设值。";
             var format = Factory.CreateRibbonBox(); format.BoxStyle = RibbonBoxStyle.Vertical;
             format.Name = "titleFormatColumn";
             format.Items.Add(titleTextEditBox);
             format.Items.Add(fontNameEditBox);
+            format.Items.Add(fontSizeEditBox);
             图片处理.Items.Add(format);
+            图片处理.Items.Add(CreateTitleColumnSeparator("titleFormatSeparator"));
 
-            // 第三行避免把较高的 ComboBox 再嵌入水平盒。
-            // 使用 EditBox + 独立预设菜单保留手输/预设字号，减少行高占用。
+            // 第四列：编组与对齐方式。独立成列，第三列三行才能保持纯 ComboBox 行高。
             autoGroupCheckBox.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
             autoGroupCheckBox.ShowImage = false;
             autoGroupCheckBox.ShowLabel = true;
@@ -81,37 +89,23 @@ namespace SlideSCI
                 titleAlignmentMenu.Items.Add(choice);
             }
             SetTitleAlignment(1);
-            var options = Factory.CreateRibbonBox(); options.BoxStyle = RibbonBoxStyle.Horizontal;
-            options.Name = "titleFormattingRow";
-            fontSizeEditBox.ScreenTip = "标题字号 (pt)";
-            titleFontSizeMenu = Factory.CreateRibbonMenu();
-            titleFontSizeMenu.Name = "titleFontSizeMenu";
-            titleFontSizeMenu.Label = "预设字号";
-            titleFontSizeMenu.ShowLabel = false;
-            titleFontSizeMenu.ShowImage = false;
-            titleFontSizeMenu.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
-            titleFontSizeMenu.ScreenTip = "选择预设字号";
-            options.Items.Add(fontSizeEditBox);
-            options.Items.Add(titleFontSizeMenu);
+            var options = Factory.CreateRibbonBox(); options.BoxStyle = RibbonBoxStyle.Vertical;
+            options.Name = "titleOptionsColumn";
             options.Items.Add(autoGroupCheckBox);
             options.Items.Add(titleAlignmentMenu);
-            format.Items.Add(options);
+            图片处理.Items.Add(options);
+
             PopulateTitleFontSizePresets(TitleFontSizePresets);
         }
 
         private void PopulateTitleFontSizePresets(IEnumerable<string> values)
         {
-            titleFontSizeMenu.Items.Clear();
+            fontSizeEditBox.Items.Clear();
             foreach (string value in values)
             {
-                var choice = Factory.CreateRibbonButton();
-                choice.Label = value;
-                choice.Click += (sender, args) =>
-                {
-                    fontSizeEditBox.Text = value;
-                    SaveSettings(sender, args);
-                };
-                titleFontSizeMenu.Items.Add(choice);
+                var item = Factory.CreateRibbonDropDownItem();
+                item.Label = value;
+                fontSizeEditBox.Items.Add(item);
             }
         }
 
@@ -140,6 +134,54 @@ namespace SlideSCI
             var separator = Factory.CreateRibbonSeparator();
             separator.Name = name;
             return separator;
+        }
+
+        /// <summary>把最近生成的标题同步到“标题”下拉列表，最新标题排在最前。</summary>
+        private void RefreshTitleHistoryCombo()
+        {
+            if (titleTextEditBox == null) return;
+            string current = titleTextEditBox.Text;
+            titleTextEditBox.Items.Clear();
+            foreach (string text in LoadTitleHistory())
+            {
+                var item = Factory.CreateRibbonDropDownItem();
+                item.Label = text;
+                titleTextEditBox.Items.Add(item);
+            }
+            titleTextEditBox.Text = current;
+        }
+
+        private List<string> LoadTitleHistory()
+        {
+            var history = new List<string>();
+            string stored = Properties.Settings.Default.TitleTextHistory;
+            if (string.IsNullOrWhiteSpace(stored)) return history;
+            foreach (string raw in stored.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string text = raw.Trim();
+                if (text.Length == 0) continue;
+                if (history.Exists(x => string.Equals(x, text, StringComparison.OrdinalIgnoreCase))) continue;
+                history.Add(text);
+                if (history.Count >= TitleHistoryLimit) break;
+            }
+            return history;
+        }
+
+        /// <summary>记住本次成功生成的标题；最新在前，超过 5 条时移除最旧的一条。</summary>
+        private void RememberTitleText(string text)
+        {
+            string candidate = (text ?? string.Empty).Trim();
+            if (candidate.Length == 0) return;
+            var history = LoadTitleHistory();
+            history.RemoveAll(x => string.Equals(x, candidate, StringComparison.OrdinalIgnoreCase));
+            history.Insert(0, candidate);
+            if (history.Count > TitleHistoryLimit)
+            {
+                history.RemoveRange(TitleHistoryLimit, history.Count - TitleHistoryLimit);
+            }
+            Properties.Settings.Default.TitleTextHistory = string.Join(TitleHistorySeparator.ToString(), history);
+            PersistSettings();
+            RefreshTitleHistoryCombo();
         }
 
         private void AddPictureTitles(PictureTitleSide side)
@@ -171,7 +213,11 @@ namespace SlideSCI
                 }
                 catch (Exception ex) { errors.Add(source.Name + "：" + ex.Message); }
             }
-            if (results.Count > 0) SelectMultipleShapes(results);
+            if (results.Count > 0)
+            {
+                RememberTitleText(titleTextEditBox.Text);
+                SelectMultipleShapes(results);
+            }
             if (errors.Count > 0) MessageBox.Show(string.Join(Environment.NewLine, errors), "添加图片标题");
         }
         private static bool TitleFinite(float value) { return !float.IsNaN(value) && !float.IsInfinity(value); }

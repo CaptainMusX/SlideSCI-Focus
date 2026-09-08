@@ -223,6 +223,7 @@ namespace SlideSCI
             distanceFromBottomEditBox.Text = Properties.Settings.Default.TitleOffsetY;
             titleOffsetXCombo.Text = Properties.Settings.Default.TitleOffsetX;
             titleTextEditBox.Text = Properties.Settings.Default.TitleText;
+            RefreshTitleHistoryCombo();
             autoGroupCheckBox.Checked = Properties.Settings.Default.AutoGroup;
 
             // Load Image Label Settings

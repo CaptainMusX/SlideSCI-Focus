@@ -12,6 +12,9 @@ namespace SlideSCI
         // ComboBox 标签比普通菜单/切换按钮的文字少一个原生左边距。
         // 不换行空格仅用于显示，不能写入数值 Text 或解析输入。
         private const string ZoomLabelInset = "\u00A0";
+        // 第一、二列的 ComboBox 与同列菜单的原生边距还差约 1–2 物理像素；
+        // 加一个更细的 hair space（U+200A）做视觉微调，第三列原本已对齐故不加。
+        private const string ZoomLabelFineInset = "\u200A";
         private ZoomSettings zoomRibbonSettings;
         private RibbonComboBox zoomSizeCombo, zoomGapCombo;
         private RibbonToggleButton zoomGroupCheck;
@@ -30,7 +33,7 @@ namespace SlideSCI
             var selection = Factory.CreateRibbonBox();
             selection.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
             selection.Items.Add(btnInsertZoomBox);
-            zoomBoxPercentCombo.Label = ZoomLabelInset + "尺寸";
+            zoomBoxPercentCombo.Label = ZoomLabelInset + ZoomLabelFineInset + "尺寸";
             zoomBoxPercentCombo.SizeString = ZoomNumberSize;
             zoomBoxPercentCombo.Text = zoomRibbonSettings.BoxPercent.ToString(CultureInfo.CurrentCulture);
             zoomBoxPercentCombo.ScreenTip = "选区框边长占原图短边的百分比（5–90）";
@@ -50,7 +53,7 @@ namespace SlideSCI
             generate.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
             generate.Items.Add(btnGenerateZoomInset);
             zoomSizeCombo = Factory.CreateRibbonComboBox();
-            zoomSizeCombo.Label = ZoomLabelInset + "尺寸";
+            zoomSizeCombo.Label = ZoomLabelInset + ZoomLabelFineInset + "尺寸";
             zoomSizeCombo.SizeString = "原图等宽";
             zoomSizeCombo.ScreenTip = "放大图尺寸";
             zoomSizeCombo.SuperTip = "输入“原图等宽”、放大倍数（如 2x）或宽度（如 5cm）。始终保持选区宽高比。";
@@ -105,7 +108,9 @@ namespace SlideSCI
                 zoomRibbonSettings.LineStyle == ZoomLineStyle.CrossedX ? "连线 交叉" : "连线 平行";
             string[] dashes = { "实线", "虚线", "点线", "点划线" };
             zoomLineMenu.Label = "引线 " + FormatZoomWeight(zoomRibbonSettings.LineWeight) + "pt";
-            zoomBoxMenu.Label = "框线 " + FormatZoomWeight(zoomRibbonSettings.BoxLineWeight) + "pt";
+            // 第一列菜单的“框线”与同列 ComboBox 的“尺寸”相差约 1 个物理像素；
+            // 给菜单加一个不可见 hair space，使两行文字左端落在同一视觉基线上。
+            zoomBoxMenu.Label = ZoomLabelFineInset + "框线 " + FormatZoomWeight(zoomRibbonSettings.BoxLineWeight) + "pt";
             zoomLineMenu.SuperTip = dashes[zoomRibbonSettings.LineDash] + "；颜色 " + ColorTranslator.ToHtml(ColorTranslator.FromOle(zoomRibbonSettings.LineColorRgb)) + "。点击设置颜色、粗细和线型；生成时应用。";
             zoomBoxMenu.SuperTip = dashes[zoomRibbonSettings.BoxLineDash] + "；颜色 " + ColorTranslator.ToHtml(ColorTranslator.FromOle(zoomRibbonSettings.BoxColorRgb)) + "。点击设置颜色、粗细和线型。";
         }

@@ -14,6 +14,9 @@
     <Setting Name="TitleText" Type="System.String" Scope="User">
       <Value Profile="(Default)">图片标题</Value>
     </Setting>
+    <Setting Name="TitleTextHistory" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
     <Setting Name="AutoGroup" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
     </Setting>
