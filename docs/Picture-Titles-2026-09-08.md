@@ -31,3 +31,11 @@
 - 对齐菜单项改为 `RibbonButton`，不再使用带 `Checked` 状态的 `RibbonToggleButton`，因此展开菜单的四个图标保持相同外观。
 
 v2.0.6 安装包：F:\SlideSCI\artifacts\inno\SlideSCI-Focus-2.0.6.0-Setup.exe。
+
+## v2.0.7 结构修正
+
+- 第三列重新由一个垂直 RibbonBox 承载，内部包含标题、字体和第三行横向格式控件；序列化 Ribbon 的顶层列固定为三列。
+- 上下/左右标题列使用相同的 Regular 按钮、相同偏移宽度和同一组上下标题图标；第三列的两个输入均使用 ComboBox，保持边框和高度一致。
+- 第三行使用与偏移相同的字号宽度，`TitleWideSize` 按第三行总宽度设置为上方两行的共同宽度。
+
+v2.0.7 安装包：F:\SlideSCI\artifacts\inno\SlideSCI-Focus-2.0.7.0-Setup.exe。

@@ -8,7 +8,12 @@
         private System.ComponentModel.IContainer components = null;
 
         public Ribbon1()
-            : base(Globals.Factory.GetRibbonFactory())
+            : this(Globals.Factory.GetRibbonFactory())
+        {
+        }
+
+        internal Ribbon1(Microsoft.Office.Tools.Ribbon.RibbonFactory factory)
+            : base(factory)
         {
             InitializeComponent();
             InitializeZoomRibbon();
@@ -129,7 +134,7 @@
             this.fontNameEditBox = this.Factory.CreateRibbonComboBox();
             this.fontSizeEditBox = this.Factory.CreateRibbonComboBox();
             this.distanceFromBottomEditBox = this.Factory.CreateRibbonComboBox();
-            this.titleTextEditBox = this.Factory.CreateRibbonEditBox();
+            this.titleTextEditBox = this.Factory.CreateRibbonComboBox();
             this.autoGroupCheckBox = this.Factory.CreateRibbonToggleButton();
             this.group1 = this.Factory.CreateRibbonGroup();
             this.labelFontSizeEditBox = this.Factory.CreateRibbonComboBox();
@@ -1283,7 +1288,7 @@
         internal Microsoft.Office.Tools.Ribbon.RibbonButton imgAutoAlign;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup 图片处理;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton AddTitleButton;
-        internal Microsoft.Office.Tools.Ribbon.RibbonEditBox titleTextEditBox;
+        internal Microsoft.Office.Tools.Ribbon.RibbonComboBox titleTextEditBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton autoGroupCheckBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton addLabelsButton;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox labelTemplateComboBox;
