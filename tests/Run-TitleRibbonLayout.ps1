@@ -1,4 +1,9 @@
-﻿[CmdletBinding()]
+﻿<#
+  SciFigure 功能区布局回归：图片自动排列输入宽度、添加图片标题四列布局、
+  局部放大三列功能分组。用 -CreatePreview 生成可打开的 PPTX 静态预览，
+  用于真实 PowerPoint 渲染验收（不做自动截图）。
+#>
+[CmdletBinding()]
 param([switch]$CreatePreview)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
@@ -10,49 +15,74 @@ $factory=[Activator]::CreateInstance($impl.GetType('Microsoft.Office.Tools.Ribbo
 $dll=[Reflection.Assembly]::LoadFrom((Join-Path $root 'SlideSCI/bin/Release/CaptainMusX.SlideSCI.Focus.dll'))
 $ctor=$dll.GetType('SlideSCI.Ribbon1').GetConstructors($flags) | Where-Object {$_.GetParameters().Length -eq 1}
 $ribbon=$ctor.Invoke(@($factory))
-$group=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片处理'}
 $script:checks=0
 function Check($ok,$label) { if(-not $ok){throw $label}; $script:checks++; "PASS $label" }
-Check ($group.Items.Count -eq 5) 'two action columns, two separators and one format column'
-$left=$group.Items[0]; $right=$group.Items[2]
+
+# ---- 图片自动排列：五个输入框宽度缩为 2/3（sizeString 6 位 -> 4 位）----
+$align=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片自动对齐'}
+$narrow=@($align.Items | Where-Object {$_.SizeString -eq '0000'})
+Check ($narrow.Count -eq 5) 'auto-arrange inputs use the narrowed 2/3 size string'
+Check (@($align.Items | Where-Object {$_.SizeString -eq '000000'}).Count -eq 0) 'no auto-arrange input keeps the old wide size string'
+
+# ---- 添加图片标题：四列，第三列每行只放一个控件 ----
+$group=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片处理'}
+Check ($group.Items.Count -eq 7) 'title group is four columns with three separators'
+$left=$group.Items[0]; $right=$group.Items[2]; $format=$group.Items[4]; $options=$group.Items[6]
 Check ($left.Items.Count -eq 3 -and $right.Items.Count -eq 3) 'identical action column structure'
+Check ($left.Items[2].Label -eq '垂直偏移' -and $right.Items[2].Label -eq '水平偏移') 'offset labels are vertical/horizontal'
 Check ($left.Items[2].SizeString -eq $right.Items[2].SizeString) 'identical offset widths'
 Check ($left.Items[0].ControlSize.ToString() -eq $right.Items[0].ControlSize.ToString() -and $left.Items[1].ControlSize.ToString() -eq $right.Items[1].ControlSize.ToString()) 'matching button control sizes'
 for($i=0;$i -lt 2;$i++) {
  Check ([Object]::ReferenceEquals($left.Items[$i].Image,$right.Items[$i].Image)) 'same icon instance in matching rows'
  Check ($left.Items[$i].Label.Length -eq $right.Items[$i].Label.Length) 'same label lengths in matching rows'
 }
-$format=$group.Items[4]
-Check ($format.BoxStyle.ToString() -eq 'Vertical' -and $format.Items.Count -eq 3) 'third column is one vertical container'
-# The third row (字号+编组+对齐方式) must stay a direct child of the third
-# column. A wrapper slot makes PowerPoint treat it as a fourth column.
-$title=$format.Items[0]; $font=$format.Items[1]; $row=$format.Items[2]
-Check ($row.Name -eq 'titleFormattingRow' -and $row.BoxStyle.ToString() -eq 'Horizontal') 'third row is the direct horizontal child of the third column'
-Check ($title.GetType() -eq $font.GetType() -and $title.SizeString -eq $font.SizeString) 'same native type and size for wide inputs'
-Check ($title.Label.Length -eq $font.Label.Length) 'wide input labels align'
-Check ($row.Items.Count -eq 3 -and $row.BoxStyle.ToString() -eq 'Horizontal') 'single horizontal third row'
-Check ($row.Items[0].SizeString -eq $left.Items[2].SizeString) 'font size matches both offsets'
-Check ($row.Items[2].Items.Count -eq 4 -and @($row.Items[2].Items | Where-Object {$_.GetType().Name -match 'Toggle'}).Count -eq 0) 'four ordinary alignment buttons'
-# Serialize the actual compiled Ribbon with the VSTO runtime.
+Check ($format.BoxStyle.ToString() -eq 'Vertical' -and $format.Items.Count -eq 3) 'third column holds three single-control rows'
+Check ($format.Items[0].Label -eq '标题' -and $format.Items[1].Label -eq '字体' -and $format.Items[2].Label -eq '字号') 'third column rows are title, font and font size'
+Check ($format.Items[2].SizeString -eq $left.Items[2].SizeString) 'font size matches both offsets'
+foreach($item in $format.Items) { Check ($item.GetType().Name -ne 'RibbonBox') 'third column has no nested layout box' }
+Check ($options.BoxStyle.ToString() -eq 'Vertical' -and $options.Items.Count -eq 2) 'fourth column holds grouping and alignment'
+Check ($options.Items[0].GetType().Name -match 'Toggle' -and $options.Items[0].Label -eq '编组') 'grouping toggle in the fourth column'
+Check ($options.Items[1].Items.Count -eq 4 -and @($options.Items[1].Items | Where-Object {$_.GetType().Name -match 'Toggle'}).Count -eq 0) 'four ordinary alignment buttons'
+
+# ---- 局部放大：三列功能分组，每列三行单控件 ----
+$zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
+Check ($zoom.Items.Count -eq 3) 'zoom group keeps three columns'
+$col1=$zoom.Items[0]; $col2=$zoom.Items[1]; $col3=$zoom.Items[2]
+Check ($col1.BoxStyle.ToString() -eq 'Vertical' -and $col1.Items.Count -eq 3) 'selection column has three rows'
+Check ($col1.Items[0].Label -eq '选区' -and $col1.Items[1].Label -eq '尺寸' -and $col1.Items[2].Label -match '^框线') 'selection column is 选区/尺寸/框线'
+Check ($col2.Items[0].Label -eq '放大' -and $col2.Items[1].Label -eq '尺寸' -and $col2.Items[2].Label -match '^引线') 'generate column is 放大/尺寸/引线'
+Check ($col3.Items[0].Label -eq '间距' -and $col3.Items[1].Label -match '^连线' -and $col3.Items[2].Label -eq '编组') 'options column is 间距/连线/编组'
+Check ($col3.Items[2].GetType().Name -match 'Toggle') 'zoom grouping control is a toggle button'
+foreach($col in @($col1,$col2,$col3)) { foreach($item in $col.Items) { Check ($item.GetType().Name -ne 'RibbonBox') 'zoom columns have no nested layout box' } }
+Check ($col1.Items[1].SizeString -eq $col3.Items[0].SizeString) 'selection size and gap share the same narrow width'
+
+# ---- 序列化真实 Ribbon XML ----
+# 横向 RibbonBox 比普通控件高约 4px，作为垂直盒最后一行会被 PowerPoint
+# 向上挤压；两个分组都不允许出现横向盒。
 $writerType=$impl.GetType('Microsoft.Office.Tools.Ribbon.RibbonManagerImpl+RibbonFactory')
 $writer=[Activator]::CreateInstance($writerType,$flags,$null,@('Microsoft.PowerPoint.Presentation',$false,$ribbon),$null)
 [xml]$xml=$writerType.GetProperty('RibbonXml',$flags).GetValue($writer,$null)
 $ns=[Xml.XmlNamespaceManager]::new($xml.NameTable); $ns.AddNamespace('r',$xml.DocumentElement.NamespaceURI)
-$actual=$xml.SelectSingleNode('//r:group[@id="图片处理"]',$ns)
-Check ($actual.SelectNodes('./r:comboBox',$ns).Count -eq 0 -and $actual.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized group keeps three top-level columns'
-$formatBox=$actual.SelectNodes('./r:box',$ns).Item(2)
-$checkRow=$formatBox.SelectNodes('./r:box[@boxStyle="horizontal"]',$ns)
-Check ($checkRow.Count -eq 1 -and $formatBox.SelectNodes('./r:box[@boxStyle="vertical"]',$ns).Count -eq 0) 'no extra vertical wrapper inside the third column (row must not become a fourth column)'
+$titleXml=$xml.SelectSingleNode('//r:group[@id="图片处理"]',$ns)
+Check ($titleXml.SelectNodes('./r:box',$ns).Count -eq 4) 'serialized title group keeps four top-level columns'
+Check ($titleXml.SelectNodes('.//r:box[@boxStyle="horizontal"]',$ns).Count -eq 0) 'title group has no horizontal box that shifts a row upward'
+$zoomXml=$xml.SelectSingleNode('//r:group[@id="zoomGroup"]',$ns)
+Check ($zoomXml.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized zoom group keeps three top-level columns'
+Check ($zoomXml.SelectNodes('.//r:box[@boxStyle="horizontal"]',$ns).Count -eq 0) 'zoom group has no horizontal box that shifts a row upward'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
+
 if($CreatePreview) {
  $controls=@{}
  function Collect($item) { $controls[$item.Id]=$item; if($item.PSObject.Properties['Items']) { foreach($child in $item.Items){Collect $child} } }
  Collect $group
  Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片自动对齐'})
+ Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'})
  $tabs=$xml.SelectSingleNode('//r:tabs',$ns)
- $tab=$xml.CreateElement('tab',$xml.DocumentElement.NamespaceURI); $tab.SetAttribute('id','TitleLayoutPreview'); $tab.SetAttribute('label','标题布局验收')
+ $tab=$xml.CreateElement('tab',$xml.DocumentElement.NamespaceURI); $tab.SetAttribute('id','LayoutPreview'); $tab.SetAttribute('label','布局验收')
  $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="图片自动对齐"]',$ns).CloneNode($true))
- $null=$tab.AppendChild($actual.CloneNode($true)); $tabs.RemoveAll(); $null=$tabs.AppendChild($tab)
+ $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="zoomGroup"]',$ns).CloneNode($true))
+ $null=$tab.AppendChild($titleXml.CloneNode($true))
+ $tabs.RemoveAll(); $null=$tabs.AppendChild($tab)
  $images=@{}; $imageIndex=0
  foreach($element in @($xml.SelectNodes('//*'))) {
   $control=$controls[$element.GetAttribute('id')]
@@ -73,12 +103,12 @@ if($CreatePreview) {
  }
  # Static preview has no callbacks or macros and does not alter add-in registration.
  $app=New-Object -ComObject PowerPoint.Application; $deck=$app.Presentations.Add(0)
- $preview=Join-Path $output ('TitleRibbon-'+[Guid]::NewGuid().ToString('N').Substring(0,6)+'.pptx')
+ $preview=Join-Path $output ('LayoutPreview-'+[Guid]::NewGuid().ToString('N').Substring(0,6)+'.pptx')
  try{$null=$deck.Slides.Add(1,12);$deck.SaveAs($preview,24)}finally{$deck.Close()}
  Add-Type -AssemblyName System.IO.Compression.FileSystem
  $zip=[IO.Compression.ZipFile]::Open($preview,'Update')
  try {
-  function ZipText($name,$text){$entry=$zip.CreateEntry($name);$stream=[IO.StreamWriter]::new($entry.Open());try{$stream.Write($text)}finally{$stream.Dispose()}}
+  function ZipText($name,$text){$entry=$zip.CreateEntry($name);$stream=[IO.StreamWriter]::new($entry.Open(),[Text.UTF8Encoding]::new($false));try{$stream.Write($text)}finally{$stream.Dispose()}}
   function ReadZipXml($name){$entry=$zip.GetEntry($name);$reader=[IO.StreamReader]::new($entry.Open());try{[xml]$result=$reader.ReadToEnd()}finally{$reader.Dispose()};$entry.Delete();return $result}
   ZipText 'customUI/customUI.xml' $xml.OuterXml
   $rels=ReadZipXml '_rels/.rels'

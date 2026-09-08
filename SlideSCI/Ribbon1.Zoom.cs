@@ -8,71 +8,86 @@ namespace SlideSCI
 {
     public partial class Ribbon1
     {
+        private const string ZoomNumberSize = "0000";
         private ZoomSettings zoomRibbonSettings;
         private RibbonComboBox zoomSizeCombo, zoomGapCombo;
-        private RibbonCheckBox zoomGroupCheck;
+        private RibbonToggleButton zoomGroupCheck;
         private RibbonMenu zoomConnectionMenu, zoomLineMenu, zoomBoxMenu;
 
         private void InitializeZoomRibbon()
         {
             zoomRibbonSettings = ZoomSettings.LoadOrDefault();
             zoomGroup.Items.Clear();
-            btnInsertZoomBox.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
-            btnInsertZoomBox.Label = "选择区域";
-            btnGenerateZoomInset.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
-            btnGenerateZoomInset.ScreenTip = "按本分组设置生成或更新放大图";
-            btnGenerateZoomInset.SuperTip = "先选择图片并点击“选择区域”，拖动或缩放选区框，再点击“生成放大图”。更新时选择选区框、放大图或引导线。原图不参与编组。";
-            var actions = Factory.CreateRibbonBox();
-            actions.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
-            actions.Items.Add(btnInsertZoomBox);
-            actions.Items.Add(btnGenerateZoomInset);
-            zoomGroupCheck = Factory.CreateRibbonCheckBox();
-            zoomGroupCheck.Label = "编组";
-            zoomGroupCheck.Checked = zoomRibbonSettings.Group;
-            zoomGroupCheck.SuperTip = "仅编组选区框、放大图和引导线；不包含原图或辅助形状。";
-            zoomGroupCheck.Click += (s, e) => { zoomRibbonSettings.Group = zoomGroupCheck.Checked; ZoomSettings.Save(zoomRibbonSettings); };
-            actions.Items.Add(zoomGroupCheck);
-            zoomGroup.Items.Add(actions);
 
-            var sizes = Factory.CreateRibbonBox();
-            sizes.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
-            zoomBoxPercentCombo.Label = "选区 %";
-            zoomBoxPercentCombo.SizeString = "原图等宽";
+            // 第一列：选区（生成选区框）→ 尺寸（选区框大小）→ 框线（选区框线条样式）。
+            btnInsertZoomBox.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
+            btnInsertZoomBox.Label = "选区";
+            btnInsertZoomBox.ScreenTip = "为选中的图片添加局部放大选区框";
+            btnInsertZoomBox.SuperTip = "选中一张图片后插入选区框。可在同一页创建多个选区，拖动或缩放到需要强调的区域。";
+            var selection = Factory.CreateRibbonBox();
+            selection.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
+            selection.Items.Add(btnInsertZoomBox);
+            zoomBoxPercentCombo.Label = "尺寸";
+            zoomBoxPercentCombo.SizeString = ZoomNumberSize;
             zoomBoxPercentCombo.Text = zoomRibbonSettings.BoxPercent.ToString(CultureInfo.CurrentCulture);
-            zoomBoxPercentCombo.ScreenTip = "边长占原图短边的百分比（5–90）；也可在幻灯片上拖动调整";
+            zoomBoxPercentCombo.ScreenTip = "选区框边长占原图短边的百分比（5–90）";
+            zoomBoxPercentCombo.SuperTip = "控制选区框大小；也可在幻灯片上拖动或缩放选区框。";
             foreach (string value in new[] { "10", "20", "25", "30", "40", "50", "60", "75", "90" }) AddZoomItem(zoomBoxPercentCombo, value);
-            sizes.Items.Add(zoomBoxPercentCombo);
+            selection.Items.Add(zoomBoxPercentCombo);
+            zoomBoxMenu = CreateZoomStrokeMenu("框线", true);
+            selection.Items.Add(zoomBoxMenu);
+            zoomGroup.Items.Add(selection);
+
+            // 第二列：放大（生成放大图）→ 尺寸（放大图大小）→ 引线（引导线线条样式）。
+            btnGenerateZoomInset.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
+            btnGenerateZoomInset.Label = "放大";
+            btnGenerateZoomInset.ScreenTip = "按本分组设置生成或更新放大图";
+            btnGenerateZoomInset.SuperTip = "先选择图片并点击“选区”，拖动或缩放选区框，再点击“放大”。更新时选择选区框、放大图或引导线。原图不参与编组。";
+            var generate = Factory.CreateRibbonBox();
+            generate.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
+            generate.Items.Add(btnGenerateZoomInset);
             zoomSizeCombo = Factory.CreateRibbonComboBox();
             zoomSizeCombo.Label = "尺寸";
             zoomSizeCombo.SizeString = "原图等宽";
+            zoomSizeCombo.ScreenTip = "放大图尺寸";
             zoomSizeCombo.SuperTip = "输入“原图等宽”、放大倍数（如 2x）或宽度（如 5cm）。始终保持选区宽高比。";
             foreach (string value in new[] { "原图等宽", "2x", "3x", "4x", "5x", "3cm", "5cm", "8cm" }) AddZoomItem(zoomSizeCombo, value);
             zoomSizeCombo.Text = zoomRibbonSettings.TargetMode == ZoomTargetMode.SameAsOriginal ? "原图等宽" :
                 zoomRibbonSettings.TargetMode == ZoomTargetMode.Multiple ? zoomRibbonSettings.Magnification + "x" : zoomRibbonSettings.CustomWidthCm + "cm";
-            sizes.Items.Add(zoomSizeCombo);
-            zoomGapCombo = Factory.CreateRibbonComboBox();
-            zoomGapCombo.Label = "间距 pt";
-            zoomGapCombo.SizeString = "原图等宽";
-            zoomGapCombo.Text = ZoomInsetHelper.CmToPoints(zoomRibbonSettings.GapCm).ToString("0.##", CultureInfo.CurrentCulture);
-            zoomGapCombo.SuperTip = "原图与放大图之间的距离；单位 pt，与图片排列的“列间距”一致。";
-            foreach (string value in new[] { "0", "5", "10", "15", "20", "30" }) AddZoomItem(zoomGapCombo, value);
-            sizes.Items.Add(zoomGapCombo);
-            zoomGroup.Items.Add(sizes);
+            generate.Items.Add(zoomSizeCombo);
+            zoomLineMenu = CreateZoomStrokeMenu("引线", false);
+            generate.Items.Add(zoomLineMenu);
+            zoomGroup.Items.Add(generate);
 
-            var styles = Factory.CreateRibbonBox();
-            styles.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
-            var connection = Factory.CreateRibbonMenu();
-            zoomConnectionMenu = connection;
-            connection.Label = "连线方式";
-            AddZoomButton(connection, "平行引线", () => zoomRibbonSettings.LineStyle = ZoomLineStyle.JournalFunnel);
-            AddZoomButton(connection, "交叉引线", () => zoomRibbonSettings.LineStyle = ZoomLineStyle.CrossedX);
-            AddZoomButton(connection, "不连线", () => zoomRibbonSettings.LineStyle = ZoomLineStyle.None);
-            styles.Items.Add(connection);
-            zoomLineMenu = CreateZoomStrokeMenu("连线样式", false);
-            zoomBoxMenu = CreateZoomStrokeMenu("选区框样式", true);
-            styles.Items.Add(zoomLineMenu);
-            styles.Items.Add(zoomBoxMenu);
-            zoomGroup.Items.Add(styles);
+            // 第三列：间距（原图与放大图距离）→ 连线（是否引线）→ 编组（开关）。
+            var options = Factory.CreateRibbonBox();
+            options.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
+            zoomGapCombo = Factory.CreateRibbonComboBox();
+            zoomGapCombo.Label = "间距";
+            zoomGapCombo.SizeString = ZoomNumberSize;
+            zoomGapCombo.Text = ZoomInsetHelper.CmToPoints(zoomRibbonSettings.GapCm).ToString("0.##", CultureInfo.CurrentCulture);
+            zoomGapCombo.ScreenTip = "原图与放大图之间的距离 (pt)";
+            zoomGapCombo.SuperTip = "单位 pt，与图片自动排列的“列间距”一致；0 表示紧贴。";
+            foreach (string value in new[] { "0", "5", "10", "15", "20", "30" }) AddZoomItem(zoomGapCombo, value);
+            options.Items.Add(zoomGapCombo);
+            zoomConnectionMenu = Factory.CreateRibbonMenu();
+            zoomConnectionMenu.Label = "连线";
+            zoomConnectionMenu.SuperTip = "选择放大图与选区框之间的引线方式。";
+            AddZoomButton(zoomConnectionMenu, "平行引线", () => zoomRibbonSettings.LineStyle = ZoomLineStyle.JournalFunnel);
+            AddZoomButton(zoomConnectionMenu, "交叉引线", () => zoomRibbonSettings.LineStyle = ZoomLineStyle.CrossedX);
+            AddZoomButton(zoomConnectionMenu, "不连线", () => zoomRibbonSettings.LineStyle = ZoomLineStyle.None);
+            options.Items.Add(zoomConnectionMenu);
+            zoomGroupCheck = Factory.CreateRibbonToggleButton();
+            zoomGroupCheck.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeRegular;
+            zoomGroupCheck.Label = "编组";
+            zoomGroupCheck.ShowImage = false;
+            zoomGroupCheck.ShowLabel = true;
+            zoomGroupCheck.Checked = zoomRibbonSettings.Group;
+            zoomGroupCheck.SuperTip = "仅编组选区框、放大图和引导线；不包含原图或辅助形状。";
+            zoomGroupCheck.Click += (s, e) => { zoomRibbonSettings.Group = zoomGroupCheck.Checked; ZoomSettings.Save(zoomRibbonSettings); };
+            options.Items.Add(zoomGroupCheck);
+            zoomGroup.Items.Add(options);
+
             RefreshZoomLabels();
             zoomBoxPercentCombo.TextChanged += ZoomPercentChanged;
             zoomSizeCombo.TextChanged += SaveZoomRibbonInputs;
@@ -82,13 +97,20 @@ namespace SlideSCI
         private void RefreshZoomLabels()
         {
             if (zoomConnectionMenu == null || zoomLineMenu == null || zoomBoxMenu == null) return;
-            zoomConnectionMenu.Label = zoomRibbonSettings.LineStyle == ZoomLineStyle.None ? "连线：无" :
-                zoomRibbonSettings.LineStyle == ZoomLineStyle.CrossedX ? "连线：交叉" : "连线：平行";
+            // 标签宽度保持恒定：切换选项时 Ribbon 不会重新排版，整组不会跳动。
+            zoomConnectionMenu.Label = zoomRibbonSettings.LineStyle == ZoomLineStyle.None ? "连线 关闭" :
+                zoomRibbonSettings.LineStyle == ZoomLineStyle.CrossedX ? "连线 交叉" : "连线 平行";
             string[] dashes = { "实线", "虚线", "点线", "点划线" };
-            zoomLineMenu.Label = "引线 " + zoomRibbonSettings.LineWeight + "pt";
-            zoomBoxMenu.Label = "选框 " + zoomRibbonSettings.BoxLineWeight + "pt";
+            zoomLineMenu.Label = "引线 " + FormatZoomWeight(zoomRibbonSettings.LineWeight) + "pt";
+            zoomBoxMenu.Label = "框线 " + FormatZoomWeight(zoomRibbonSettings.BoxLineWeight) + "pt";
             zoomLineMenu.SuperTip = dashes[zoomRibbonSettings.LineDash] + "；颜色 " + ColorTranslator.ToHtml(ColorTranslator.FromOle(zoomRibbonSettings.LineColorRgb)) + "。点击设置颜色、粗细和线型；生成时应用。";
             zoomBoxMenu.SuperTip = dashes[zoomRibbonSettings.BoxLineDash] + "；颜色 " + ColorTranslator.ToHtml(ColorTranslator.FromOle(zoomRibbonSettings.BoxColorRgb)) + "。点击设置颜色、粗细和线型。";
+        }
+
+        /// <summary>固定两位小数，保证“框线/引线”菜单标签宽度一致。</summary>
+        private static string FormatZoomWeight(float weight)
+        {
+            return weight.ToString("0.00", CultureInfo.InvariantCulture);
         }
 
         private void SaveZoomRibbonInputs(object sender, RibbonControlEventArgs e)

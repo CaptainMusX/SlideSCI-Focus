@@ -26,10 +26,10 @@ namespace SlideSCI
             AddTitleButton.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
             AddTitleButton.Label = "添加下标题";
             vertical.Items.Add(图片上标题); vertical.Items.Add(AddTitleButton);
-            distanceFromBottomEditBox.Label = "上下偏移";
+            distanceFromBottomEditBox.Label = "垂直偏移";
             distanceFromBottomEditBox.SizeString = TitleNumberSize;
-            distanceFromBottomEditBox.ScreenTip = "上下偏移 (pt)";
-            distanceFromBottomEditBox.SuperTip = "正值向下，负值向上；与左右偏移叠加，对新生成的四个方向标题都生效。";
+            distanceFromBottomEditBox.ScreenTip = "垂直偏移 (pt)";
+            distanceFromBottomEditBox.SuperTip = "正值向下，负值向上；与水平偏移叠加，对新生成的四个方向标题都生效。";
             vertical.Items.Add(distanceFromBottomEditBox);
             图片处理.Items.Add(vertical);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleVerticalSeparator"));
@@ -39,31 +39,32 @@ namespace SlideSCI
             horizontal.Items.Add(CreateSideTitleButton("添加右标题", PictureTitleSide.Right));
             titleOffsetXCombo = Factory.CreateRibbonComboBox();
             titleOffsetXCombo.Name = "titleOffsetXCombo";
-            titleOffsetXCombo.Label = "左右偏移"; titleOffsetXCombo.SizeString = TitleNumberSize;
-            titleOffsetXCombo.ScreenTip = "左右偏移 (pt)";
-            titleOffsetXCombo.SuperTip = "正值向右，负值向左；与上下偏移叠加，对新生成的四个方向标题都生效。";
+            titleOffsetXCombo.Label = "水平偏移"; titleOffsetXCombo.SizeString = TitleNumberSize;
+            titleOffsetXCombo.ScreenTip = "水平偏移 (pt)";
+            titleOffsetXCombo.SuperTip = "正值向右，负值向左；与垂直偏移叠加，对新生成的四个方向标题都生效。";
             horizontal.Items.Add(titleOffsetXCombo);
             图片处理.Items.Add(horizontal);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleHorizontalSeparator"));
 
-            // The third column is one vertical layout item. Its three rows are
-            // 标题, 字体, and the horizontal row 字号+编组+对齐方式. The horizontal
-            // row stays a direct child of this column (single nesting level):
-            // wrapping it in another vertical slot makes PowerPoint render it as
-            // a new column, turning the group into four columns.
+            // 第三列：标题 / 字体 / 字号，每行只放一个控件。
+            // 横向 RibbonBox 比普通控件高约 4px，作为垂直盒的最后一行时会被
+            // PowerPoint 向上挤压，使“字号”与上方“字体”之间只剩 1px 间距；
+            // 因此把编组开关和对齐方式移到独立的第四列，三列的行高保持一致。
             titleTextEditBox.SizeString = TitleWideSize;
             fontNameEditBox.Label = "字体"; fontNameEditBox.SizeString = TitleWideSize;
+            fontSizeEditBox.Label = "字号"; fontSizeEditBox.SizeString = TitleNumberSize;
             var format = Factory.CreateRibbonBox(); format.BoxStyle = RibbonBoxStyle.Vertical;
             format.Name = "titleFormatColumn";
             format.Items.Add(titleTextEditBox);
             format.Items.Add(fontNameEditBox);
-            var row = Factory.CreateRibbonBox(); row.BoxStyle = RibbonBoxStyle.Horizontal;
-            row.Name = "titleFormattingRow";
-            fontSizeEditBox.Label = "字号"; fontSizeEditBox.SizeString = TitleNumberSize;
+            format.Items.Add(fontSizeEditBox);
+            图片处理.Items.Add(format);
+            图片处理.Items.Add(CreateTitleColumnSeparator("titleFormatSeparator"));
+
+            // 第四列：编组开关与标题对齐方式。
             autoGroupCheckBox.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
             autoGroupCheckBox.ShowImage = false;
             autoGroupCheckBox.ShowLabel = true;
-            row.Items.Add(fontSizeEditBox); row.Items.Add(autoGroupCheckBox);
             titleAlignmentMenu = Factory.CreateRibbonMenu();
             titleAlignmentMenu.Name = "titleAlignmentMenu";
             titleAlignmentMenu.ShowLabel = false; titleAlignmentMenu.ShowImage = true;
@@ -79,9 +80,11 @@ namespace SlideSCI
                 titleAlignmentMenu.Items.Add(choice);
             }
             SetTitleAlignment(1);
-            row.Items.Add(titleAlignmentMenu);
-            format.Items.Add(row);
-            图片处理.Items.Add(format);
+            var options = Factory.CreateRibbonBox(); options.BoxStyle = RibbonBoxStyle.Vertical;
+            options.Name = "titleOptionColumn";
+            options.Items.Add(autoGroupCheckBox);
+            options.Items.Add(titleAlignmentMenu);
+            图片处理.Items.Add(options);
         }
 
         private RibbonButton CreateSideTitleButton(string label, PictureTitleSide side)
@@ -119,7 +122,7 @@ namespace SlideSCI
             if (!TryParseFloat(fontSizeEditBox.Text, out float size) || !TitleFinite(size) || size <= 0 || size > 4000 ||
                 !TryParseFloat(titleOffsetXCombo.Text, out float x) || !TitleFinite(x) ||
                 !TryParseFloat(distanceFromBottomEditBox.Text, out float y) || !TitleFinite(y))
-            { MessageBox.Show("请输入有效的字号和上下/左右偏移量 (pt)。", "添加图片标题"); return; }
+            { MessageBox.Show("请输入有效的字号和垂直/水平偏移量 (pt)。", "添加图片标题"); return; }
             var sources = new List<P.Shape>();
             foreach (P.Shape shape in (GetSortedSelection(selection, 10f) ?? selection.ShapeRange)) sources.Add(shape);
             var results = new List<P.Shape>();

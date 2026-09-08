@@ -262,7 +262,7 @@ namespace SlideSCI
 
             var note = new Label
             {
-                Text = "提示：单击工具栏「生成放大图」将直接沿用本次设置；同一页多个选区时，请先选中要更新的选区框或它所在的组。",
+                Text = "提示：单击工具栏「放大」将直接沿用本次设置；同一页多个选区时，请先选中要更新的选区框或它所在的组。",
                 Font = ScientificUiTheme.BodyFont(8.5f),
                 ForeColor = ScientificUiTheme.TextSecondary,
                 AutoSize = true,

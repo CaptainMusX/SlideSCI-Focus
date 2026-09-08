@@ -326,7 +326,7 @@
             this.imgAutoAlign_colNum.Items.Add(ribbonDropDownItemImpl20);
             this.imgAutoAlign_colNum.Label = "列数量";
             this.imgAutoAlign_colNum.Name = "imgAutoAlign_colNum";
-            this.imgAutoAlign_colNum.SizeString = "000000";
+            this.imgAutoAlign_colNum.SizeString = "0000";
             this.imgAutoAlign_colNum.Text = null;
             this.imgAutoAlign_colNum.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgAutoAlign_colNum_TextChanged);
             // 
@@ -334,7 +334,7 @@
             // 
             this.imgAutoAlign_colSpace.Label = "列间距";
             this.imgAutoAlign_colSpace.Name = "imgAutoAlign_colSpace";
-            this.imgAutoAlign_colSpace.SizeString = "000000";
+            this.imgAutoAlign_colSpace.SizeString = "0000";
             this.imgAutoAlign_colSpace.Text = null;
             this.imgAutoAlign_colSpace.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgAutoAlign_colSpace_TextChanged);
             // 
@@ -343,7 +343,7 @@
             this.imgAutoAlign_rowSpace.Label = "行间距";
             this.imgAutoAlign_rowSpace.Name = "imgAutoAlign_rowSpace";
             this.imgAutoAlign_rowSpace.ScreenTip = "行间距变动，会自动调整标题字号";
-            this.imgAutoAlign_rowSpace.SizeString = "000000";
+            this.imgAutoAlign_rowSpace.SizeString = "0000";
             this.imgAutoAlign_rowSpace.Text = null;
             this.imgAutoAlign_rowSpace.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgAutoAlign_rowSpace_TextChanged);
             // 
@@ -392,7 +392,7 @@
             this.imgWidthEditBpx.Label = "图宽(cm)";
             this.imgWidthEditBpx.Name = "imgWidthEditBpx";
             this.imgWidthEditBpx.ScreenTip = "统一设置图片宽度cm";
-            this.imgWidthEditBpx.SizeString = "000000";
+            this.imgWidthEditBpx.SizeString = "0000";
             this.imgWidthEditBpx.Text = null;
             this.imgWidthEditBpx.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgWidthEditBpx_TextChanged);
             // 
@@ -441,7 +441,7 @@
             this.imgHeightEditBox.Label = "图高(cm)";
             this.imgHeightEditBox.Name = "imgHeightEditBox";
             this.imgHeightEditBox.ScreenTip = "统一设置图片高度cm";
-            this.imgHeightEditBox.SizeString = "000000";
+            this.imgHeightEditBox.SizeString = "0000";
             this.imgHeightEditBox.Text = null;
             this.imgHeightEditBox.TextChanged += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.imgHeightEditBox_TextChanged);
             // 
@@ -456,10 +456,10 @@
             // btnInsertZoomBox
             // 
             this.btnInsertZoomBox.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
-            this.btnInsertZoomBox.Label = "插入选区框";
+            this.btnInsertZoomBox.Label = "选区";
             this.btnInsertZoomBox.Name = "btnInsertZoomBox";
             this.btnInsertZoomBox.OfficeImageId = "PictureCrop";
-            this.btnInsertZoomBox.ScreenTip = "为选中的图片添加局部放大选区";
+            this.btnInsertZoomBox.ScreenTip = "为选中的图片添加局部放大选区框";
             this.btnInsertZoomBox.ShowImage = true;
             this.btnInsertZoomBox.SuperTip = "选中一张图片后插入选区框。可在同一页创建多个选区，拖动或缩放到需要强调的区域。";
             this.btnInsertZoomBox.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.btnInsertZoomBox_Click);
@@ -467,7 +467,7 @@
             // btnGenerateZoomInset
             // 
             this.btnGenerateZoomInset.ControlSize = Microsoft.Office.Core.RibbonControlSize.RibbonControlSizeLarge;
-            this.btnGenerateZoomInset.Label = "生成放大图";
+            this.btnGenerateZoomInset.Label = "放大";
             this.btnGenerateZoomInset.Name = "btnGenerateZoomInset";
             this.btnGenerateZoomInset.OfficeImageId = "ZoomIn";
             this.btnGenerateZoomInset.ScreenTip = "精确裁剪并生成期刊风格放大图（Ctrl+单击打开设置）";
@@ -477,7 +477,7 @@
             // 
             // zoomBoxPercentCombo
             // 
-            this.zoomBoxPercentCombo.Label = "选区大小%";
+            this.zoomBoxPercentCombo.Label = "尺寸";
             this.zoomBoxPercentCombo.Name = "zoomBoxPercentCombo";
             this.zoomBoxPercentCombo.Text = "40";
             this.zoomBoxPercentCombo.ScreenTip = "选区框边长占图片宽度的百分比（5–90）";
