@@ -1,5 +1,5 @@
 ﻿<#
-  SciFigure 功能区布局回归：图片自动排列输入宽度、添加图片标题四列布局、
+  SciFigure 功能区布局回归：图片自动排列输入宽度、添加图片标题三列布局、
   局部放大三列功能分组。用 -CreatePreview 生成可打开的 PPTX 静态预览，
   用于真实 PowerPoint 渲染验收（不做自动截图）。
 #>
@@ -24,10 +24,10 @@ $narrow=@($align.Items | Where-Object {$_.SizeString -eq '0000'})
 Check ($narrow.Count -eq 5) 'auto-arrange inputs use the narrowed 2/3 size string'
 Check (@($align.Items | Where-Object {$_.SizeString -eq '000000'}).Count -eq 0) 'no auto-arrange input keeps the old wide size string'
 
-# ---- 添加图片标题：四列，第三列每行只放一个控件 ----
+# ---- 添加图片标题：三列，第三列第三行为字号、编组和对齐菜单 ----
 $group=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片处理'}
-Check ($group.Items.Count -eq 7) 'title group is four columns with three separators'
-$left=$group.Items[0]; $right=$group.Items[2]; $format=$group.Items[4]; $options=$group.Items[6]
+Check ($group.Items.Count -eq 5) 'title group is three columns with two separators'
+$left=$group.Items[0]; $right=$group.Items[2]; $format=$group.Items[4]; $options=$format.Items[2]
 Check ($left.Items.Count -eq 3 -and $right.Items.Count -eq 3) 'identical action column structure'
 Check ($left.Items[2].Label -eq '垂直偏移' -and $right.Items[2].Label -eq '水平偏移') 'offset labels are vertical/horizontal'
 Check ($left.Items[2].SizeString -eq $right.Items[2].SizeString) 'identical offset widths'
@@ -36,13 +36,12 @@ for($i=0;$i -lt 2;$i++) {
  Check ([Object]::ReferenceEquals($left.Items[$i].Image,$right.Items[$i].Image)) 'same icon instance in matching rows'
  Check ($left.Items[$i].Label.Length -eq $right.Items[$i].Label.Length) 'same label lengths in matching rows'
 }
-Check ($format.BoxStyle.ToString() -eq 'Vertical' -and $format.Items.Count -eq 3) 'third column holds three single-control rows'
-Check ($format.Items[0].Label -eq '标题' -and $format.Items[1].Label -eq '字体' -and $format.Items[2].Label -eq '字号') 'third column rows are title, font and font size'
-Check ($format.Items[2].SizeString -eq $left.Items[2].SizeString) 'font size matches both offsets'
-foreach($item in $format.Items) { Check ($item.GetType().Name -ne 'RibbonBox') 'third column has no nested layout box' }
-Check ($options.BoxStyle.ToString() -eq 'Vertical' -and $options.Items.Count -eq 2) 'fourth column holds grouping and alignment'
-Check ($options.Items[0].GetType().Name -match 'Toggle' -and $options.Items[0].Label -eq '编组') 'grouping toggle in the fourth column'
-Check ($options.Items[1].Items.Count -eq 4 -and @($options.Items[1].Items | Where-Object {$_.GetType().Name -match 'Toggle'}).Count -eq 0) 'four ordinary alignment buttons'
+Check ($format.BoxStyle.ToString() -eq 'Vertical' -and $format.Items.Count -eq 3) 'third column holds three rows'
+Check ($format.Items[0].Label -eq '标题' -and $format.Items[1].Label -eq '字体' -and $options.Items[0].Label -eq '字号') 'third column rows are title, font and font size'
+Check ($options.Items[0].SizeString -eq $left.Items[2].SizeString) 'font size matches both offsets'
+Check ($options.BoxStyle.ToString() -eq 'Horizontal' -and $options.Items.Count -eq 3) 'third row holds font size, grouping and alignment horizontally'
+Check ($options.Items[1].GetType().Name -match 'Toggle' -and $options.Items[1].Label -eq '编组') 'grouping toggle in the third row'
+Check ($options.Items[2].Items.Count -eq 4 -and @($options.Items[2].Items | Where-Object {$_.GetType().Name -match 'Toggle'}).Count -eq 0) 'four ordinary alignment buttons'
 
 # ---- 局部放大：三列功能分组，每列三行单控件 ----
 $zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
@@ -57,15 +56,15 @@ foreach($col in @($col1,$col2,$col3)) { foreach($item in $col.Items) { Check ($i
 Check ($col1.Items[1].SizeString -eq $col3.Items[0].SizeString) 'selection size and gap share the same narrow width'
 
 # ---- 序列化真实 Ribbon XML ----
-# 横向 RibbonBox 比普通控件高约 4px，作为垂直盒最后一行会被 PowerPoint
-# 向上挤压；两个分组都不允许出现横向盒。
+# 确认水平选项行是第三列的直接第三个子项，避免独立列或额外垂直槽。
 $writerType=$impl.GetType('Microsoft.Office.Tools.Ribbon.RibbonManagerImpl+RibbonFactory')
 $writer=[Activator]::CreateInstance($writerType,$flags,$null,@('Microsoft.PowerPoint.Presentation',$false,$ribbon),$null)
 [xml]$xml=$writerType.GetProperty('RibbonXml',$flags).GetValue($writer,$null)
 $ns=[Xml.XmlNamespaceManager]::new($xml.NameTable); $ns.AddNamespace('r',$xml.DocumentElement.NamespaceURI)
 $titleXml=$xml.SelectSingleNode('//r:group[@id="图片处理"]',$ns)
-Check ($titleXml.SelectNodes('./r:box',$ns).Count -eq 4) 'serialized title group keeps four top-level columns'
-Check ($titleXml.SelectNodes('.//r:box[@boxStyle="horizontal"]',$ns).Count -eq 0) 'title group has no horizontal box that shifts a row upward'
+Check ($titleXml.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized title group keeps three top-level columns'
+Check ($titleXml.SelectNodes('.//r:box[@boxStyle="horizontal"]',$ns).Count -eq 1) 'title group has exactly one horizontal formatting row'
+Check ($titleXml.SelectNodes('./r:box[3]/r:box[@boxStyle="horizontal"]/*',$ns).Count -eq 3) 'serialized third column contains all three formatting controls in one row'
 $zoomXml=$xml.SelectSingleNode('//r:group[@id="zoomGroup"]',$ns)
 Check ($zoomXml.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized zoom group keeps three top-level columns'
 Check ($zoomXml.SelectNodes('.//r:box[@boxStyle="horizontal"]',$ns).Count -eq 0) 'zoom group has no horizontal box that shifts a row upward'

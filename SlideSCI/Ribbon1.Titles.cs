@@ -46,10 +46,7 @@ namespace SlideSCI
             图片处理.Items.Add(horizontal);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleHorizontalSeparator"));
 
-            // 第三列：标题 / 字体 / 字号，每行只放一个控件。
-            // 横向 RibbonBox 比普通控件高约 4px，作为垂直盒的最后一行时会被
-            // PowerPoint 向上挤压，使“字号”与上方“字体”之间只剩 1px 间距；
-            // 因此把编组开关和对齐方式移到独立的第四列，三列的行高保持一致。
+            // 第三列：标题 / 字体 / 字号、编组与对齐方式。
             titleTextEditBox.SizeString = TitleWideSize;
             fontNameEditBox.Label = "字体"; fontNameEditBox.SizeString = TitleWideSize;
             fontSizeEditBox.Label = "字号"; fontSizeEditBox.SizeString = TitleNumberSize;
@@ -57,11 +54,9 @@ namespace SlideSCI
             format.Name = "titleFormatColumn";
             format.Items.Add(titleTextEditBox);
             format.Items.Add(fontNameEditBox);
-            format.Items.Add(fontSizeEditBox);
             图片处理.Items.Add(format);
-            图片处理.Items.Add(CreateTitleColumnSeparator("titleFormatSeparator"));
 
-            // 第四列：编组开关与标题对齐方式。
+            // 第三行直接使用水平盒，不能再包垂直槽或挂到分组顶层。
             autoGroupCheckBox.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
             autoGroupCheckBox.ShowImage = false;
             autoGroupCheckBox.ShowLabel = true;
@@ -80,11 +75,12 @@ namespace SlideSCI
                 titleAlignmentMenu.Items.Add(choice);
             }
             SetTitleAlignment(1);
-            var options = Factory.CreateRibbonBox(); options.BoxStyle = RibbonBoxStyle.Vertical;
-            options.Name = "titleOptionColumn";
+            var options = Factory.CreateRibbonBox(); options.BoxStyle = RibbonBoxStyle.Horizontal;
+            options.Name = "titleFormattingRow";
+            options.Items.Add(fontSizeEditBox);
             options.Items.Add(autoGroupCheckBox);
             options.Items.Add(titleAlignmentMenu);
-            图片处理.Items.Add(options);
+            format.Items.Add(options);
         }
 
         private RibbonButton CreateSideTitleButton(string label, PictureTitleSide side)
