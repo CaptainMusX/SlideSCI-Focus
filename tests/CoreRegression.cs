@@ -50,9 +50,15 @@ internal static class CoreRegression
         Directory.CreateDirectory(directory);
         try
         {
+            float parsed;
+            Check(ZoomSettings.TryParsePercent("25%", out parsed) && parsed == 25f && ZoomSettings.TryParsePercent("25", out parsed) && parsed == 25f, "percentage accepts explicit or omitted unit");
+            Check(ZoomSettings.TryParseMagnification("10x", out parsed) && parsed == 10f && ZoomSettings.TryParseMagnification("1", out parsed) && parsed == 1f, "magnification accepts explicit or omitted unit");
+            foreach (string invalidInput in new[] { "NaN", "Infinity", "0", "101x", "2xx", "5cm", "原图等宽", "" })
+                Check(!ZoomSettings.TryParseMagnification(invalidInput, out parsed), "reject invalid magnification: " + invalidInput);
+            Check(!ZoomSettings.TryParsePercent("25%%", out parsed) && !ZoomSettings.TryParsePercent("91%", out parsed), "percentage rejects repeated units and out of range");
             string current = Path.Combine(directory, "current.xml");
             string legacy = Path.Combine(directory, "legacy.xml");
-            Check(Load(current).Magnification == 2f, "missing settings use defaults");
+            Check(Load(current).Magnification == 1f, "missing settings use defaults");
             Check(Save(new ZoomSettings { Magnification = 4f, LineColorRgb = 0x123456 }, legacy), "initial save");
             string legacyText = File.ReadAllText(legacy);
             File.WriteAllText(current, "<broken>");
@@ -62,12 +68,17 @@ internal static class CoreRegression
                 "current takes priority and legacy is unchanged");
             File.WriteAllText(current, "<ZoomSettings><Magnification>NaN</Magnification><CustomWidthCm>INF</CustomWidthCm><GapCm>-1</GapCm><LineDash>9</LineDash></ZoomSettings>");
             ZoomSettings normalized = Load(current);
-            Check(normalized.Magnification == 2f && normalized.CustomWidthCm == 10f && normalized.GapCm == 0.5f && normalized.LineDash == 0,
+            Check(normalized.Magnification == 1f && normalized.CustomWidthCm == 10f && normalized.GapCm == 0.5f && normalized.LineDash == 0,
                 "nonfinite and out of range XML values normalized");
             ZoomSettings invalid = new ZoomSettings { TargetMode = (ZoomTargetMode)99, LineStyle = (ZoomLineStyle)99, LineColorRgb = -1 };
-            Check(Save(invalid, current) && Load(current).TargetMode == ZoomTargetMode.SameAsOriginal && Load(current).LineColorRgb == 0,
+            Check(Save(invalid, current) && Load(current).TargetMode == ZoomTargetMode.Multiple && Load(current).LineColorRgb == 0,
                 "invalid enums and colors normalized before serialization");
             Check((int)invalid.TargetMode == 99, "normalization does not mutate caller");
+            Check(Save(new ZoomSettings { BoxLineVisible = false, LineVisible = false, LineEndArrow = 2,
+                LineDash = 6, BoxLineWeight = 4.5f, LineWeight = 2.25f, RecentStrokeColors = "123,456" }, current), "extended stroke settings save");
+            var stroke = Load(current);
+            Check(!stroke.BoxLineVisible && !stroke.LineVisible && stroke.LineEndArrow == 2 && stroke.LineDash == 6
+                && stroke.BoxLineWeight == 4.5f && stroke.LineWeight == 2.25f && stroke.RecentStrokeColors == "123,456", "extended stroke settings survive roundtrip without clamping");
             string before = File.ReadAllText(current);
             using (File.Open(current, FileMode.Open, FileAccess.Read, FileShare.None))
                 Check(!Save(new ZoomSettings { Magnification = 9f }, current), "locked destination reports failure");

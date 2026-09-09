@@ -36,8 +36,11 @@ class ZoomNativeSmoke
             for (int round = 0; round < 5; round++)
             {
                 box = All(slide).Find(b => b.Name == name);
+                var strokes = new ZoomSettings { BoxLineWeight = 4.5f, LineWeight = 2.25f,
+                    BoxColorRgb = 0x123456, LineColorRgb = 0x654321, LineDash = 6,
+                    BoxLineVisible = round != 2, LineVisible = round != 2, LineEndArrow = 2 };
                 var result = ZoomInsetHelper.GenerateZoomInset(slide, box, source, 140, 140, 10, round == 3 ? ZoomLineStyle.CrossedX : round == 4 ? ZoomLineStyle.None : ZoomLineStyle.JournalFunnel,
-                    1, 1.5f, 0, 0, MsoLineDashStyle.msoLineDash, round == 1, app, MsoLineDashStyle.msoLineDash);
+                    1, 1.5f, 0, 0, MsoLineDashStyle.msoLineDash, round == 1, app, MsoLineDashStyle.msoLineDash, strokes);
                 Check(result.Ok, "generation round " + round + ": " + result.Error);
                 Check(result.Glued, "native glued endpoints");
                 var shapes = All(slide);
@@ -49,12 +52,20 @@ class ZoomNativeSmoke
                     else if (shape.Connector == MsoTriState.msoTrue)
                     {
                         lines++;
+                        Check(Math.Abs(shape.Line.Weight - 2.25f) < 0.01f && shape.Line.ForeColor.RGB == 0x654321, "connector weight and color applied");
+                        Check(shape.Line.DashStyle == MsoLineDashStyle.msoLineLongDash && shape.Line.EndArrowheadStyle == MsoArrowheadStyle.msoArrowheadTriangle, "connector dash and arrow applied");
+                        Check((shape.Line.Visible == MsoTriState.msoTrue) == (round != 2), "connector no-outline state applied");
                         Check(shape.ConnectorFormat.BeginConnected == MsoTriState.msoTrue && shape.ConnectorFormat.EndConnected == MsoTriState.msoTrue, "connector attachment");
                         Check(shape.ConnectorFormat.BeginConnectedShape.ConnectionSiteCount == 8 && shape.ConnectorFormat.EndConnectedShape.ConnectionSiteCount == 8, "eight native sites on both ends");
                         Console.WriteLine("SITES " + shape.ConnectorFormat.BeginConnectionSite + " -> " + shape.ConnectorFormat.EndConnectionSite);
                     }
                     else if (shape.Type == MsoShapeType.msoPicture) { pictures++; if (shape.Id != source.Id) inset = shape; }
-                    else if (ZoomInsetHelper.IsZoomBox(shape)) boxes++;
+                    else if (ZoomInsetHelper.IsZoomBox(shape))
+                    {
+                        boxes++;
+                        Check(Math.Abs(shape.Line.Weight - 4.5f) < 0.01f && shape.Line.ForeColor.RGB == 0x123456, "box stroke applied on update");
+                        Check((shape.Line.Visible == MsoTriState.msoTrue) == (round != 2), "box no-outline state applied");
+                    }
                     else throw new Exception("Redundant shape " + shape.Name);
                 }
                 Check(lines == (round == 4 ? 0 : 2) && pictures == 2 && boxes == 1 && groups == (round == 1 ? 1 : 0), "only source, box, picture, two connectors and optional single group");

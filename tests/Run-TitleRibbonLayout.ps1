@@ -1,8 +1,5 @@
-﻿<#
-  SciFigure 功能区布局回归：图片自动排列输入宽度、添加图片标题四列布局、
-  标题历史下拉、局部放大三列功能分组与标签对齐。用 -CreatePreview 生成可打开的 PPTX 静态预览，
-  用于真实 PowerPoint 渲染验收（不做自动截图）。
-#>
+﻿<# Source/serialized-Ribbon regression only. -CreatePreview creates a separate
+   static PPTX for manual inspection; these checks do not prove pixel alignment. #>
 [CmdletBinding()]
 param([switch]$CreatePreview)
 $ErrorActionPreference='Stop'
@@ -17,101 +14,73 @@ $ctor=$dll.GetType('SlideSCI.Ribbon1').GetConstructors($flags) | Where-Object {$
 $ribbon=$ctor.Invoke(@($factory))
 $script:checks=0
 function Check($ok,$label) { if(-not $ok){throw $label}; $script:checks++; "PASS $label" }
-
-# ---- 图片自动排列：五个输入框宽度缩为 2/3（sizeString 6 位 -> 4 位）----
+Check ($ribbon.Tabs[0].Visible -and $ribbon.Tabs[0].ControlId.CustomId -eq 'CaptainMusX_SlideSCIFocus_SciFigure') 'SciFigure has a product-specific visible tab identity'
+Check ($ribbon.Tabs[1].ControlId.CustomId -eq 'CaptainMusX_SlideSCIFocus_SciStudio') 'SciStudio has a different product-specific identity'
 $align=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片自动对齐'}
-$narrow=@($align.Items | Where-Object {$_.SizeString -eq '0000'})
-Check ($narrow.Count -eq 5) 'auto-arrange inputs use the narrowed 2/3 size string'
-Check (@($align.Items | Where-Object {$_.SizeString -eq '000000'}).Count -eq 0) 'no auto-arrange input keeps the old wide size string'
-
-# ---- 添加图片标题：四列，第三列三行 ComboBox，第四列编组与对齐 ----
+Check (@($align.Items | Where-Object {$_.SizeString -eq '0000'}).Count -eq 5) 'auto-arrangement input widths preserved'
 $group=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片处理'}
-Check ($group.Items.Count -eq 7) 'title group is four columns with three separators'
-$left=$group.Items[0]; $right=$group.Items[2]; $format=$group.Items[4]; $options=$group.Items[6]
-Check ($left.Items.Count -eq 3 -and $right.Items.Count -eq 3) 'identical action column structure'
-Check ($left.Items[2].Label -eq '垂直偏移' -and $right.Items[2].Label -eq '水平偏移') 'offset labels are vertical/horizontal'
-Check ($left.Items[2].SizeString -eq $right.Items[2].SizeString) 'identical offset widths'
-Check ($left.Items[0].ControlSize.ToString() -eq $right.Items[0].ControlSize.ToString() -and $left.Items[1].ControlSize.ToString() -eq $right.Items[1].ControlSize.ToString()) 'matching button control sizes'
-for($i=0;$i -lt 2;$i++) {
- Check ([Object]::ReferenceEquals($left.Items[$i].Image,$right.Items[$i].Image)) 'same icon instance in matching rows'
- Check ($left.Items[$i].Label.Length -eq $right.Items[$i].Label.Length) 'same label lengths in matching rows'
+Check ($group.Items.Count -eq 5) 'title group has three columns and two separators'
+$left=$group.Items[0]; $right=$group.Items[2]; $format=$group.Items[4]
+foreach($column in @($left,$right,$format)) {
+ Check ($column.Items.Count -eq 3) 'title column has three rows'
+ foreach($row in $column.Items) { Check ($row.BoxStyle.ToString() -eq 'Horizontal') 'all title rows have equal container depth' }
 }
-Check ($format.BoxStyle.ToString() -eq 'Vertical' -and $format.Items.Count -eq 3) 'third column holds three rows'
-Check ($format.Items[0].Label -eq '标题' -and $format.Items[1].Label -eq '字体' -and $format.Items[2].Label -eq '字号') 'third column rows are title, font and font size'
-foreach($item in $format.Items) { Check ($item.GetType().Name -match 'ComboBox') 'third column rows are all combo boxes' }
-Check ($format.Items[0].SizeString -eq $format.Items[1].SizeString) 'title and font share the wide width'
-Check ($format.Items[2].SizeString -eq $left.Items[2].SizeString) 'font size matches both offsets'
-Check ($options.BoxStyle.ToString() -eq 'Vertical' -and $options.Items.Count -eq 2) 'fourth column holds grouping and alignment'
-Check ($options.Items[0].GetType().Name -match 'Toggle' -and $options.Items[0].Label -eq '编组') 'grouping toggle in the fourth column'
-Check ($options.Items[1].Items.Count -eq 4 -and @($options.Items[1].Items | Where-Object {$_.GetType().Name -match 'Toggle'}).Count -eq 0) 'four alignment buttons in the fourth column'
-
-# ---- 字号 ComboBox：内置预设，输入框与下拉箭头一体 ----
-Check ($format.Items[2].Items.Count -eq 29 -and $format.Items[2].Items[0].Label -eq '2' -and $format.Items[2].Items[28].Label -eq '200') 'font size presets are ready before Ribbon Load'
+Check ($left.Items[2].Items[0].Label -eq '垂直偏移' -and $right.Items[2].Items[0].Label -eq '水平偏移') 'offset controls preserved'
+Check ($format.Items[2].Items.Count -eq 3) 'third title row contains exactly three controls'
+$size=$format.Items[2].Items[0]; $alignment=$format.Items[2].Items[1]; $grouping=$format.Items[2].Items[2]
+Check ($size.Label -eq '字号' -and $size.GetType().Name -match 'ComboBox') 'complete editable font-size combo remains first'
+Check ($alignment.Name -eq 'titleAlignmentMenu' -and $alignment.Items.Count -eq 4) 'alignment menu remains second'
+Check ($grouping.Label -eq '编组' -and $grouping.GetType().Name -match 'Toggle') 'grouping toggle remains third'
+Check ($format.Items[0].Items[0].SizeString -eq $format.Items[1].Items[0].SizeString) 'title and font have matching input widths'
+Check ($size.Items.Count -eq 29 -and $size.Items[0].Label -eq '2' -and $size.Items[28].Label -eq '200') 'font-size presets preserved'
 $populate=$dll.GetType('SlideSCI.Ribbon1').GetMethod('PopulateTitleFontSizePresets',$flags)
 $arguments=New-Object object[] 1; $arguments[0]=[string[]]@('8','12','24')
-$originalSize=$format.Items[2].Text
-$originalPresets=[string[]]@($format.Items[2].Items | ForEach-Object {$_.Label})
-$format.Items[2].Text='13.5'
-$null=$populate.Invoke($ribbon,$arguments)
-Check ((@($format.Items[2].Items | ForEach-Object {$_.Label}) -join ',') -eq '8,12,24') 'font size preset values and order preserved'
-$null=$populate.Invoke($ribbon,$arguments)
-Check ($format.Items[2].Items.Count -eq 3 -and $format.Items[2].Text -eq '13.5') 'rebuilding presets neither duplicates entries nor changes typed size'
-$arguments[0]=$originalPresets; $null=$populate.Invoke($ribbon,$arguments)
-$format.Items[2].Text=$originalSize
-
-# ---- 标题历史：最新 5 条、去重、超限淘汰 ----
+$originalPresets=[string[]]@($size.Items | ForEach-Object {$_.Label})
+$size.Text='13.5';$null=$populate.Invoke($ribbon,$arguments);$null=$populate.Invoke($ribbon,$arguments)
+Check ($size.Items.Count -eq 3 -and $size.Text -eq '13.5') 'rebuilding presets preserves typed size and avoids duplicates'
+$arguments[0]=$originalPresets;$null=$populate.Invoke($ribbon,$arguments)
 $settingsType=$dll.GetType('SlideSCI.Properties.Settings')
-$staticFlags=[Reflection.BindingFlags]'Static,Public,NonPublic'
-$settingsDefault=$settingsType.GetProperty('Default',$staticFlags).GetValue($null,$null)
+$settingsDefault=$settingsType.GetProperty('Default',[Reflection.BindingFlags]'Static,Public,NonPublic').GetValue($null,$null)
 $historyProperty=$settingsType.GetProperty('TitleTextHistory',$flags)
 $originalHistory=$historyProperty.GetValue($settingsDefault)
 $refreshHistory=$dll.GetType('SlideSCI.Ribbon1').GetMethod('RefreshTitleHistoryCombo',$flags)
-$historyProperty.SetValue($settingsDefault, (@('A','B','C','D','E','F') -join [char]10))
-$null=$refreshHistory.Invoke($ribbon,$null)
-Check ((@($format.Items[0].Items | ForEach-Object {$_.Label}) -join ',') -eq 'A,B,C,D,E') 'title history keeps the latest five entries'
-$historyProperty.SetValue($settingsDefault, (@('A','A','B') -join [char]10))
-$null=$refreshHistory.Invoke($ribbon,$null)
-Check ((@($format.Items[0].Items | ForEach-Object {$_.Label}) -join ',') -eq 'A,B') 'title history removes duplicate entries'
-$historyProperty.SetValue($settingsDefault,$originalHistory)
-$null=$refreshHistory.Invoke($ribbon,$null)
-
-# ---- 局部放大：三列功能分组，每列三行单控件 ----
+try {
+ $historyProperty.SetValue($settingsDefault, (@('A','A','B','C','D','E','F') -join [char]10))
+ $null=$refreshHistory.Invoke($ribbon,$null)
+ Check ((@($format.Items[0].Items[0].Items | ForEach-Object {$_.Label}) -join ',') -eq 'A,B,C,D,E') 'history deduplicates and limits entries to five'
+} finally { $historyProperty.SetValue($settingsDefault,$originalHistory); $null=$refreshHistory.Invoke($ribbon,$null) }
 $zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
-Check ($zoom.Items.Count -eq 3) 'zoom group keeps three columns'
-$col1=$zoom.Items[0]; $col2=$zoom.Items[1]; $col3=$zoom.Items[2]
-Check ($col1.BoxStyle.ToString() -eq 'Vertical' -and $col1.Items.Count -eq 3) 'selection column has three rows'
-Check ($col1.Items[0].Label -eq '选区' -and $col1.Items[1].Label.Trim() -eq '尺寸' -and $col1.Items[2].Label.TrimStart([char]0x200A) -match '^框线') 'selection column is 选区/尺寸/框线'
-Check ($col2.Items[0].Label -eq '放大' -and $col2.Items[1].Label.Trim() -eq '尺寸' -and $col2.Items[2].Label -match '^引线') 'generate column is 放大/尺寸/引线'
-Check ($col3.Items[0].Label.Trim() -eq '间距' -and $col3.Items[1].Label -match '^连线' -and $col3.Items[2].Label -eq '编组') 'options column is 间距/连线/编组'
-Check ($col3.Items[2].GetType().Name -match 'Toggle') 'zoom grouping control is a toggle button'
-foreach($col in @($col1,$col2,$col3)) { foreach($item in $col.Items) { Check ($item.GetType().Name -ne 'RibbonBox') 'zoom columns have no nested layout box' } }
-Check ($col1.Items[1].SizeString -eq $col3.Items[0].SizeString) 'selection size and gap share the same narrow width'
-
-$nbsp=[string][char]0x00A0
-$fine=[string][char]0x200A
-foreach($combo in @($col1.Items[1],$col2.Items[1],$col3.Items[0])) {
- Check ($combo.Label.StartsWith($nbsp)) 'zoom input label has a fixed optical inset'
- Check (-not $combo.Text.Contains($nbsp) -and -not $combo.Text.Contains($fine)) 'optical inset never enters numeric text'
+Check ($zoom.Items.Count -eq 3) 'zoom keeps three columns'
+$col1=$zoom.Items[0];$col2=$zoom.Items[1];$col3=$zoom.Items[2]
+foreach($column in $zoom.Items) { Check ($column.Items.Count -eq 3) 'zoom column keeps three rows' }
+Check ($col1.Items[0].Items[0].Label -eq '框选区域' -and $col2.Items[0].Items[0].Label -eq '放大选区') 'zoom action labels updated'
+Check ($col1.Items[0].Items[0].ShowImage -and $col2.Items[0].Items[0].ShowImage) 'zoom actions retain icons'
+Check ($col1.Items[1].Items[0].SizeString -eq $col2.Items[1].Items[0].SizeString) 'zoom size fields use identical widths'
+Check ($col1.Items[1].Items[0].SizeString -eq '00%') 'size width reserves space for visible units'
+Check ((@($col2.Items[1].Items[0].Items | ForEach-Object {$_.Label}) -join ',') -eq '1x,2x,3x,4x,5x,10x') 'only requested magnification presets are offered'
+Check (@($col1.Items[1].Items[0].Items | Where-Object {$_.Label -notlike '*%'}).Count -eq 0) 'percentage presets display their unit'
+foreach($column in @($col1,$col2)) {
+ Check ($column.Items[2].Items.Count -eq 2 -and $column.Items[2].Items[0].GetType().Name -match 'Label') 'stroke label is independent of the menu'
+ $menu=$column.Items[2].Items[1]
+ Check ($menu.GetType().Name -match 'RibbonMenu') 'stroke selector is a menu, not a split button'
+ Check (@($menu.Items | Where-Object {$_.GetType().Name -match 'Gallery'}).Count -ge 2) 'theme and standard color galleries exist'
+ Check (@($menu.Items | Where-Object {$_.Label -eq '无轮廓'}).Count -eq 1) 'no-outline option exists'
+ Check (@($menu.Items | Where-Object {$_.Label -eq '箭头'}).Count -eq 1) 'arrow options exist'
+ Check (@($menu.Items | Where-Object {$_.Label -eq '取色器'}).Count -eq 1) 'eyedropper entry exists'
+ $populateStroke=$dll.GetType('SlideSCI.Ribbon1').GetMethod('PopulateStrokeMenu',$flags)
+ $before=$menu.Items.Count
+ $null=$populateStroke.Invoke($ribbon,@($menu,[Object]::ReferenceEquals($column,$col1)))
+ Check ($menu.Items.Count -eq $before) 'reopening dynamic outline menu does not duplicate controls'
 }
-Check ($col1.Items[1].Label.StartsWith($nbsp+$fine) -and $col2.Items[1].Label.StartsWith($nbsp+$fine)) 'first two zoom columns use the fine inset'
-Check (-not $col3.Items[0].Label.StartsWith($nbsp+$fine)) 'third zoom column keeps the base inset'
-
-# ---- 序列化真实 Ribbon XML ----
-# 确认第三列是三个 ComboBox，第四列是编组/对齐，且不存在横向盒。
 $writerType=$impl.GetType('Microsoft.Office.Tools.Ribbon.RibbonManagerImpl+RibbonFactory')
 $writer=[Activator]::CreateInstance($writerType,$flags,$null,@('Microsoft.PowerPoint.Presentation',$false,$ribbon),$null)
 [xml]$xml=$writerType.GetProperty('RibbonXml',$flags).GetValue($writer,$null)
-$ns=[Xml.XmlNamespaceManager]::new($xml.NameTable); $ns.AddNamespace('r',$xml.DocumentElement.NamespaceURI)
+$ns=[Xml.XmlNamespaceManager]::new($xml.NameTable);$ns.AddNamespace('r',$xml.DocumentElement.NamespaceURI)
 $titleXml=$xml.SelectSingleNode('//r:group[@id="图片处理"]',$ns)
-Check ($titleXml.SelectNodes('./r:box',$ns).Count -eq 4) 'serialized title group keeps four top-level columns'
-Check ($titleXml.SelectNodes('.//r:box[@boxStyle="horizontal"]',$ns).Count -eq 0) 'title group has no horizontal formatting box'
-Check ($titleXml.SelectNodes('./r:box[3]/*',$ns).Count -eq 3 -and $titleXml.SelectNodes('./r:box[3]/r:comboBox',$ns).Count -eq 3) 'serialized third column is three combo boxes'
-Check ($titleXml.SelectNodes('./r:box[4]/*',$ns).Count -eq 2) 'serialized fourth column is grouping and alignment'
-$zoomXml=$xml.SelectSingleNode('//r:group[@id="zoomGroup"]',$ns)
-Check ($zoomXml.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized zoom group keeps three top-level columns'
-Check ($zoomXml.SelectNodes('.//r:box[@boxStyle="horizontal"]',$ns).Count -eq 0) 'zoom group has no horizontal box that shifts a row upward'
+Check ($titleXml.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized title group has three columns'
+Check ($titleXml.SelectSingleNode('./r:box[3]/r:box[3]',$ns).ChildNodes.Count -eq 3) 'serialized font-size, alignment and grouping share the third row'
+Check (@($xml.SelectNodes('//*[@id]') | Group-Object id | Where-Object Count -gt 1).Count -eq 0) 'serialized control IDs are unique'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
-
 if($CreatePreview) {
  $controls=@{}
  function Collect($item) { $controls[$item.Id]=$item; if($item.PSObject.Properties['Items']) { foreach($child in $item.Items){Collect $child} } }

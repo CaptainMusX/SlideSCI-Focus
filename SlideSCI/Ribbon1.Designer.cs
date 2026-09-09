@@ -26,6 +26,22 @@
         /// <param name="disposing">如果应释放托管资源，为 true；否则为 false。</param>
         protected override void Dispose(bool disposing)
         {
+            if (disposing)
+            {
+                if (app != null)
+                {
+                    try
+                    {
+                        app.WindowSelectionChange -= App_WindowSelectionChange;
+                        if (ribbonEventsAttached) app.WindowActivate -= RefreshRibbonForWindow;
+                    }
+                    catch (System.Runtime.InteropServices.COMException) { }
+                }
+                ribbonEventsAttached = false;
+                settingsSaveTimer?.Dispose();
+                foreach (var swatch in strokeSwatches.Values) swatch.Dispose();
+                strokeSwatches.Clear();
+            }
             if (disposing && (components != null))
             {
                 components.Dispose();
@@ -241,7 +257,9 @@
             this.tab2.Groups.Add(this.group1);
             this.tab2.Groups.Add(this.group3);
             this.tab2.Label = "SciFigure";
-            this.tab2.Name = "tab2";
+            this.tab2.Name = "CaptainMusX_SlideSCIFocus_SciFigure";
+            this.tab2.ControlId.ControlIdType = Microsoft.Office.Tools.Ribbon.RibbonControlIdType.Custom;
+            this.tab2.Visible = true;
             // 
             // 图片自动对齐
             // 
@@ -635,7 +653,8 @@
             this.tab1.Groups.Add(this.codeGroup);
             this.tab1.Groups.Add(this.group2);
             this.tab1.Label = "SciStudio";
-            this.tab1.Name = "tab1";
+            this.tab1.Name = "CaptainMusX_SlideSCIFocus_SciStudio";
+            this.tab1.ControlId.ControlIdType = Microsoft.Office.Tools.Ribbon.RibbonControlIdType.Custom;
             // 
             // 复制图片格式
             // 

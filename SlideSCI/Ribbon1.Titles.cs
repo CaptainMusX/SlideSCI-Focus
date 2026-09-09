@@ -52,8 +52,7 @@ namespace SlideSCI
             图片处理.Items.Add(horizontal);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleHorizontalSeparator"));
 
-            // 第三列：标题 / 字体 / 字号，每行一个 ComboBox。
-            // 与“图片自动排列”的“列数量”列保持相同结构，避免横向盒造成行高不一致。
+            // 第三列三行采用同一层级，第三行容纳字号、对齐与编组。
             titleTextEditBox.Label = "标题";
             titleTextEditBox.SizeString = TitleWideSize;
             titleTextEditBox.ScreenTip = "标题文字";
@@ -64,13 +63,13 @@ namespace SlideSCI
             fontSizeEditBox.SuperTip = "可直接输入字号，也可从下拉列表选择预设值。";
             var format = Factory.CreateRibbonBox(); format.BoxStyle = RibbonBoxStyle.Vertical;
             format.Name = "titleFormatColumn";
-            format.Items.Add(titleTextEditBox);
-            format.Items.Add(fontNameEditBox);
-            format.Items.Add(fontSizeEditBox);
+            // All three rows use the same container depth. Mixing bare combos
+            // with a boxed last row gives Office different row measurements.
+            format.Items.Add(CreateRibbonRow("titleTextRow", titleTextEditBox));
+            format.Items.Add(CreateRibbonRow("titleFontRow", fontNameEditBox));
             图片处理.Items.Add(format);
-            图片处理.Items.Add(CreateTitleColumnSeparator("titleFormatSeparator"));
 
-            // 第四列：编组与对齐方式。独立成列，第三列三行才能保持纯 ComboBox 行高。
+            // 对齐与编组留在第三列第三行。
             autoGroupCheckBox.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
             autoGroupCheckBox.ShowImage = false;
             autoGroupCheckBox.ShowLabel = true;
@@ -89,13 +88,34 @@ namespace SlideSCI
                 titleAlignmentMenu.Items.Add(choice);
             }
             SetTitleAlignment(1);
-            var options = Factory.CreateRibbonBox(); options.BoxStyle = RibbonBoxStyle.Vertical;
-            options.Name = "titleOptionsColumn";
-            options.Items.Add(autoGroupCheckBox);
-            options.Items.Add(titleAlignmentMenu);
-            图片处理.Items.Add(options);
+            format.Items.Add(CreateRibbonRow("titleFormatRow", fontSizeEditBox, titleAlignmentMenu, autoGroupCheckBox));
+
+            // Match the row containers of the formatting column in both action
+            // columns, rather than compensating with invisible Unicode spacing.
+            WrapRibbonRows(vertical, "titleVertical");
+            WrapRibbonRows(horizontal, "titleHorizontal");
 
             PopulateTitleFontSizePresets(TitleFontSizePresets);
+        }
+
+        private RibbonBox CreateRibbonRow(string name, params RibbonControl[] controls)
+        {
+            var row = Factory.CreateRibbonBox();
+            row.Name = name;
+            row.BoxStyle = RibbonBoxStyle.Horizontal;
+            foreach (var control in controls) row.Items.Add(control);
+            return row;
+        }
+
+        private void WrapRibbonRows(RibbonBox column, string prefix)
+        {
+            // VSTO's IList.CopyTo expects its private implementation array;
+            // enumerate instead of List(IEnumerable)/ToArray on that collection.
+            var controls = new List<RibbonControl>();
+            foreach (var control in column.Items) controls.Add(control);
+            column.Items.Clear();
+            for (int i = 0; i < controls.Count; i++)
+                column.Items.Add(CreateRibbonRow(prefix + "Row" + i, controls[i]));
         }
 
         private void PopulateTitleFontSizePresets(IEnumerable<string> values)

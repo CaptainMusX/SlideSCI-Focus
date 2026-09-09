@@ -11,8 +11,8 @@ namespace SlideSCI
     /// </summary>
     public class ZoomSettings
     {
-        public ZoomTargetMode TargetMode { get; set; } = ZoomTargetMode.SameAsOriginal;
-        public float Magnification { get; set; } = 2f;
+        public ZoomTargetMode TargetMode { get; set; } = ZoomTargetMode.Multiple;
+        public float Magnification { get; set; } = 1f;
         public float CustomWidthCm { get; set; } = 10f;
         /// <summary>仅在「与原图相同尺寸」时生效：保持选区比例、按原图范围等比放大，不拉伸。</summary>
         public bool KeepAspect { get; set; } = true;
@@ -26,9 +26,27 @@ namespace SlideSCI
         public int LineDash { get; set; }
         public bool Group { get; set; } = false;
         public int BoxLineDash { get; set; }
+        public bool BoxLineVisible { get; set; } = true;
+        public bool LineVisible { get; set; } = true;
+        public int LineBeginArrow { get; set; } = 1;
+        public int LineEndArrow { get; set; } = 1;
+        public string RecentStrokeColors { get; set; } = "";
         public float BoxPercent { get; set; } = 40f;
 
         public static ZoomSettings CreateDefault() => new ZoomSettings();
+
+        public static bool TryParsePercent(string text, out float value) => TryParseUnit(text, "%", 5f, 90f, out value);
+        public static bool TryParseMagnification(string text, out float value) => TryParseUnit(text, "x", 0.1f, 100f, out value);
+
+        private static bool TryParseUnit(string text, string unit, float min, float max, out float value)
+        {
+            string input = (text ?? string.Empty).Trim();
+            if (input.EndsWith(unit, StringComparison.OrdinalIgnoreCase))
+                input = input.Substring(0, input.Length - unit.Length).TrimEnd();
+            bool parsed = float.TryParse(input, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out value)
+                || float.TryParse(input, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value);
+            return parsed && !float.IsNaN(value) && !float.IsInfinity(value) && value >= min && value <= max;
+        }
 
         /// <summary>读取设置；文件不存在时返回默认值。</summary>
         public static ZoomSettings LoadOrDefault()
@@ -108,17 +126,19 @@ namespace SlideSCI
         internal ZoomSettings NormalizedCopy()
         {
             var copy = (ZoomSettings)MemberwiseClone();
-            if (!Enum.IsDefined(typeof(ZoomTargetMode), copy.TargetMode)) copy.TargetMode = ZoomTargetMode.SameAsOriginal;
+            if (!Enum.IsDefined(typeof(ZoomTargetMode), copy.TargetMode)) copy.TargetMode = ZoomTargetMode.Multiple;
             if (!Enum.IsDefined(typeof(ZoomLineStyle), copy.LineStyle)) copy.LineStyle = ZoomLineStyle.JournalFunnel;
-            copy.Magnification = ValidNumber(copy.Magnification, 0.1f, 100f, 2f);
+            copy.Magnification = ValidNumber(copy.Magnification, 0.1f, 100f, 1f);
             copy.CustomWidthCm = ValidNumber(copy.CustomWidthCm, 0.1f, 200f, 10f);
             copy.GapCm = ValidNumber(copy.GapCm, 0f, 50f, 0.5f);
-            copy.LineWeight = ValidNumber(copy.LineWeight, 0.5f, 2f, 1f);
-            copy.BoxLineWeight = ValidNumber(copy.BoxLineWeight, 0.5f, 3f, 1.5f);
+            copy.LineWeight = ValidNumber(copy.LineWeight, 0.25f, 6f, 1f);
+            copy.BoxLineWeight = ValidNumber(copy.BoxLineWeight, 0.25f, 6f, 1.5f);
             if (copy.LineColorRgb < 0 || copy.LineColorRgb > 0xFFFFFF) copy.LineColorRgb = 0;
             if (copy.BoxColorRgb < 0 || copy.BoxColorRgb > 0xFFFFFF) copy.BoxColorRgb = 0;
-            if (copy.LineDash < 0 || copy.LineDash > 3) copy.LineDash = 0;
-            if (copy.BoxLineDash < 0 || copy.BoxLineDash > 3) copy.BoxLineDash = 0;
+            if (copy.LineDash < 0 || copy.LineDash > 7) copy.LineDash = 0;
+            if (copy.BoxLineDash < 0 || copy.BoxLineDash > 7) copy.BoxLineDash = 0;
+            if (copy.LineBeginArrow < 1 || copy.LineBeginArrow > 6) copy.LineBeginArrow = 1;
+            if (copy.LineEndArrow < 1 || copy.LineEndArrow > 6) copy.LineEndArrow = 1;
             copy.BoxPercent = ValidNumber(copy.BoxPercent, 5f, 90f, 40f);
             return copy;
         }
@@ -130,8 +150,28 @@ namespace SlideSCI
                 case 1: return Microsoft.Office.Core.MsoLineDashStyle.msoLineDash;
                 case 2: return Microsoft.Office.Core.MsoLineDashStyle.msoLineRoundDot;
                 case 3: return Microsoft.Office.Core.MsoLineDashStyle.msoLineDashDot;
+                case 4: return Microsoft.Office.Core.MsoLineDashStyle.msoLineSquareDot;
+                case 5: return Microsoft.Office.Core.MsoLineDashStyle.msoLineDashDotDot;
+                case 6: return Microsoft.Office.Core.MsoLineDashStyle.msoLineLongDash;
+                case 7: return Microsoft.Office.Core.MsoLineDashStyle.msoLineLongDashDot;
                 default: return Microsoft.Office.Core.MsoLineDashStyle.msoLineSolid;
             }
+        }
+
+        internal void ApplyStroke(Microsoft.Office.Interop.PowerPoint.Shape shape, bool box)
+        {
+            var line = shape.Line;
+            line.Weight = box ? BoxLineWeight : LineWeight;
+            line.ForeColor.RGB = box ? BoxColorRgb : LineColorRgb;
+            line.DashStyle = GetDashStyle(box ? BoxLineDash : LineDash);
+            // PowerPoint rejects arrowhead assignments on closed selection
+            // outlines, including the no-arrow value. Only connectors support it.
+            if (!box)
+            {
+                line.BeginArrowheadStyle = (Microsoft.Office.Core.MsoArrowheadStyle)LineBeginArrow;
+                line.EndArrowheadStyle = (Microsoft.Office.Core.MsoArrowheadStyle)LineEndArrow;
+            }
+            line.Visible = (box ? BoxLineVisible : LineVisible) ? Microsoft.Office.Core.MsoTriState.msoTrue : Microsoft.Office.Core.MsoTriState.msoFalse;
         }
 
         private static float ValidNumber(float value, float minimum, float maximum, float fallback)

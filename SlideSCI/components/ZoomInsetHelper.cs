@@ -259,7 +259,8 @@ namespace SlideSCI
             int boxColorRgb,
             Office.MsoLineDashStyle lineDash,
             bool group,
-            PowerPoint.Application app, Office.MsoLineDashStyle boxDash = Office.MsoLineDashStyle.msoLineSolid)
+            PowerPoint.Application app, Office.MsoLineDashStyle boxDash = Office.MsoLineDashStyle.msoLineSolid,
+            ZoomSettings strokeSettings = null)
         {
             var result = new ZoomInsetResult();
             string artifactKey = null;
@@ -334,6 +335,7 @@ namespace SlideSCI
                 box.Line.ForeColor.RGB = boxColorRgb;
                 box.Line.Weight = boxLineWeight;
                 box.Line.DashStyle = boxDash;
+                strokeSettings?.ApplyStroke(box, true);
                 AnchoredUnit boxUnit = CreateAnchoredUnit(box);
                 AnchoredUnit insetUnit = CreateAnchoredUnit(duplicate);
                 result.Created.Add(boxUnit.Group);
@@ -369,6 +371,7 @@ namespace SlideSCI
                     result.Glued &= glued;
                     lines.Add(line);
                     result.Created.Add(line);
+                    strokeSettings?.ApplyStroke(line, false);
                 }
 
                 var names = new List<string> { boxUnit.Group.Name, insetUnit.Group.Name };

@@ -32,6 +32,16 @@ namespace SlideSCI
         private SpacingForm spacingForm = null;
         private ScaleForm scaleForm = null;
         private Timer settingsSaveTimer;
+        private bool ribbonEventsAttached;
+
+        private void RefreshRibbonForWindow(Presentation presentation, DocumentWindow window)
+        {
+            // Re-query the existing visibility value after PowerPoint has bound
+            // a presentation window. Do not force Visible=true here: Office's
+            // user customization remains authoritative.
+            try { RibbonUI?.InvalidateControl(tab2.ControlId.CustomId); }
+            catch (COMException ex) { System.Diagnostics.Trace.TraceWarning("SciFigure refresh: {0}", ex.Message); }
+        }
 
         public enum AlignmentPosition
         {
@@ -204,6 +214,12 @@ namespace SlideSCI
             app = Globals.ThisAddIn.Application;
             app.WindowSelectionChange -= App_WindowSelectionChange;
             app.WindowSelectionChange += App_WindowSelectionChange;
+            if (!ribbonEventsAttached)
+            {
+                app.WindowActivate += RefreshRibbonForWindow;
+                ribbonEventsAttached = true;
+            }
+            RefreshRibbonForWindow(null, null);
 
             if (settingsSaveTimer == null)
             {
@@ -6086,7 +6102,7 @@ namespace SlideSCI
                     return;
                 }
 
-                if (!TryParseFloat(zoomBoxPercentCombo.Text, out float percent) || float.IsNaN(percent) || float.IsInfinity(percent) || percent < 5 || percent > 90)
+                if (!ZoomSettings.TryParsePercent(zoomBoxPercentCombo.Text, out float percent))
                 {
                     MessageBox.Show("选区大小请输入 5–90。", "局部放大");
                     return;
@@ -6096,6 +6112,7 @@ namespace SlideSCI
                 Shape box = ZoomInsetHelper.InsertZoomBox(slide, picture, percent, zoomRibbonSettings.BoxLineWeight);
                 box.Line.ForeColor.RGB = zoomRibbonSettings.BoxColorRgb;
                 box.Line.DashStyle = ZoomSettings.GetDashStyle(zoomRibbonSettings.BoxLineDash);
+                zoomRibbonSettings.ApplyStroke(box, true);
                 SelectMultipleShapes(new List<Shape> { box });
             }
             catch (Exception ex)
@@ -6178,7 +6195,7 @@ namespace SlideSCI
                 settings.BoxColorRgb,
                 ZoomSettings.GetDashStyle(settings.LineDash),
                 settings.Group,
-                app, ZoomSettings.GetDashStyle(settings.BoxLineDash));
+                app, ZoomSettings.GetDashStyle(settings.BoxLineDash), settings);
         }
     }
 }
