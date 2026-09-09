@@ -10,6 +10,9 @@ namespace SlideSCI
     public partial class Ribbon1
     {
         private const string TitleNumberSize = "00";
+        // 原生按钮/菜单/切换按钮的文字比标签控件多约 7 物理像素内缩（200% DPI）；
+        // 边缘对齐的标签用不可见空格补齐，使同列最左侧文字视觉对齐。
+        private const string TitleLabelInset = LabelInset;
         private const string TitleWideSize = "00000000000000";
         private const int TitleHistoryLimit = 5;
         private const char TitleHistorySeparator = '\n';
@@ -31,12 +34,17 @@ namespace SlideSCI
             图片上标题.Label = "添加上标题";
             AddTitleButton.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
             AddTitleButton.Label = "添加下标题";
+            // Rows 1-2 stay bare: a bare button keeps the native 4px row gap, a
+            // horizontal wrapper collapses it and gives the packed 48px pitch the
+            // reference "列数量" column does not have.
             vertical.Items.Add(图片上标题); vertical.Items.Add(AddTitleButton);
-            distanceFromBottomEditBox.Label = "垂直偏移";
+            distanceFromBottomEditBox.Label = TitleLabelInset + "垂直偏移";
             distanceFromBottomEditBox.SizeString = TitleNumberSize;
             distanceFromBottomEditBox.ScreenTip = "垂直偏移 (pt)";
             distanceFromBottomEditBox.SuperTip = "正值向下，负值向上；与水平偏移叠加，对新生成的四个方向标题都生效。";
-            vertical.Items.Add(distanceFromBottomEditBox);
+            // Row 3 keeps a horizontal container so the offset input lines up with
+            // the third row of every other column in the group.
+            vertical.Items.Add(CreateRibbonRow("titleVerticalRow2", distanceFromBottomEditBox));
             图片处理.Items.Add(vertical);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleVerticalSeparator"));
 
@@ -45,28 +53,27 @@ namespace SlideSCI
             horizontal.Items.Add(CreateSideTitleButton("添加右标题", PictureTitleSide.Right));
             titleOffsetXCombo = Factory.CreateRibbonComboBox();
             titleOffsetXCombo.Name = "titleOffsetXCombo";
-            titleOffsetXCombo.Label = "水平偏移"; titleOffsetXCombo.SizeString = TitleNumberSize;
+            titleOffsetXCombo.Label = TitleLabelInset + "水平偏移"; titleOffsetXCombo.SizeString = TitleNumberSize;
             titleOffsetXCombo.ScreenTip = "水平偏移 (pt)";
             titleOffsetXCombo.SuperTip = "正值向右，负值向左；与垂直偏移叠加，对新生成的四个方向标题都生效。";
-            horizontal.Items.Add(titleOffsetXCombo);
+            horizontal.Items.Add(CreateRibbonRow("titleHorizontalRow2", titleOffsetXCombo));
             图片处理.Items.Add(horizontal);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleHorizontalSeparator"));
 
-            // 第三列三行采用同一层级，第三行容纳字号、对齐与编组。
-            titleTextEditBox.Label = "标题";
+            // 第三列：标题/字体保持裸 ComboBox（与“列数量”列相同的 52pt 行距），
+            // 第三行用横向容器容纳字号、对齐与编组三个控件。
+            titleTextEditBox.Label = TitleLabelInset + "标题";
             titleTextEditBox.SizeString = TitleWideSize;
             titleTextEditBox.ScreenTip = "标题文字";
             titleTextEditBox.SuperTip = "可直接输入，也可从下拉列表选择最近生成的标题。";
-            fontNameEditBox.Label = "字体"; fontNameEditBox.SizeString = TitleWideSize;
-            fontSizeEditBox.Label = "字号"; fontSizeEditBox.SizeString = TitleNumberSize;
+            fontNameEditBox.Label = TitleLabelInset + "字体"; fontNameEditBox.SizeString = TitleWideSize;
+            fontSizeEditBox.Label = TitleLabelInset + "字号"; fontSizeEditBox.SizeString = TitleNumberSize;
             fontSizeEditBox.ScreenTip = "标题字号 (pt)";
             fontSizeEditBox.SuperTip = "可直接输入字号，也可从下拉列表选择预设值。";
             var format = Factory.CreateRibbonBox(); format.BoxStyle = RibbonBoxStyle.Vertical;
             format.Name = "titleFormatColumn";
-            // All three rows use the same container depth. Mixing bare combos
-            // with a boxed last row gives Office different row measurements.
-            format.Items.Add(CreateRibbonRow("titleTextRow", titleTextEditBox));
-            format.Items.Add(CreateRibbonRow("titleFontRow", fontNameEditBox));
+            format.Items.Add(titleTextEditBox);
+            format.Items.Add(fontNameEditBox);
             图片处理.Items.Add(format);
 
             // 对齐与编组留在第三列第三行。
@@ -89,11 +96,6 @@ namespace SlideSCI
             }
             SetTitleAlignment(1);
             format.Items.Add(CreateRibbonRow("titleFormatRow", fontSizeEditBox, titleAlignmentMenu, autoGroupCheckBox));
-
-            // Match the row containers of the formatting column in both action
-            // columns, rather than compensating with invisible Unicode spacing.
-            WrapRibbonRows(vertical, "titleVertical");
-            WrapRibbonRows(horizontal, "titleHorizontal");
 
             PopulateTitleFontSizePresets(TitleFontSizePresets);
         }

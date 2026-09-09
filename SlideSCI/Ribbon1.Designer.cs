@@ -41,6 +41,8 @@
                 settingsSaveTimer?.Dispose();
                 foreach (var swatch in strokeSwatches.Values) swatch.Dispose();
                 strokeSwatches.Clear();
+                foreach (var preview in strokePreviews.Values) preview.Dispose();
+                strokePreviews.Clear();
             }
             if (disposing && (components != null))
             {

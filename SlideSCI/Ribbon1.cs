@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Text;
@@ -22,6 +22,10 @@ namespace SlideSCI
 {
     public partial class Ribbon1
     {
+        // 原生按钮/菜单/切换按钮的文字比标签控件多约 7 物理像素内缩（200% DPI）；
+        // 边缘对齐的标签用不可见空格（thin space + hair space）补齐，
+        // 使同一列内所有控件的最左侧文字视觉对齐。
+        internal const string LabelInset = "\u2009\u200A";
         private PowerPoint.Application app;
         private float copiedWidth;
         private float copiedHeight;

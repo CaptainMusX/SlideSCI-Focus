@@ -1,4 +1,4 @@
-﻿<# Source/serialized-Ribbon regression only. -CreatePreview creates a separate
+<# Source/serialized-Ribbon regression only. -CreatePreview creates a separate
    static PPTX for manual inspection; these checks do not prove pixel alignment. #>
 [CmdletBinding()]
 param([switch]$CreatePreview)
@@ -23,15 +23,16 @@ Check ($group.Items.Count -eq 5) 'title group has three columns and two separato
 $left=$group.Items[0]; $right=$group.Items[2]; $format=$group.Items[4]
 foreach($column in @($left,$right,$format)) {
  Check ($column.Items.Count -eq 3) 'title column has three rows'
- foreach($row in $column.Items) { Check ($row.BoxStyle.ToString() -eq 'Horizontal') 'all title rows have equal container depth' }
+ foreach($row in @($column.Items[0],$column.Items[1])) { Check (-not $row.PSObject.Properties['BoxStyle']) 'title rows 1-2 stay bare for the native 4px row gap' }
+ Check ($column.Items[2].BoxStyle.ToString() -eq 'Horizontal') 'title row 3 keeps a horizontal container'
 }
-Check ($left.Items[2].Items[0].Label -eq '垂直偏移' -and $right.Items[2].Items[0].Label -eq '水平偏移') 'offset controls preserved'
+Check ($left.Items[2].Items[0].Label.EndsWith('垂直偏移') -and $right.Items[2].Items[0].Label.EndsWith('水平偏移')) 'offset controls preserved'
 Check ($format.Items[2].Items.Count -eq 3) 'third title row contains exactly three controls'
 $size=$format.Items[2].Items[0]; $alignment=$format.Items[2].Items[1]; $grouping=$format.Items[2].Items[2]
-Check ($size.Label -eq '字号' -and $size.GetType().Name -match 'ComboBox') 'complete editable font-size combo remains first'
+Check ($size.Label.EndsWith('字号') -and $size.GetType().Name -match 'ComboBox') 'complete editable font-size combo remains first'
 Check ($alignment.Name -eq 'titleAlignmentMenu' -and $alignment.Items.Count -eq 4) 'alignment menu remains second'
 Check ($grouping.Label -eq '编组' -and $grouping.GetType().Name -match 'Toggle') 'grouping toggle remains third'
-Check ($format.Items[0].Items[0].SizeString -eq $format.Items[1].Items[0].SizeString) 'title and font have matching input widths'
+Check ($format.Items[0].SizeString -eq $format.Items[1].SizeString) 'title and font have matching input widths'
 Check ($size.Items.Count -eq 29 -and $size.Items[0].Label -eq '2' -and $size.Items[28].Label -eq '200') 'font-size presets preserved'
 $populate=$dll.GetType('SlideSCI.Ribbon1').GetMethod('PopulateTitleFontSizePresets',$flags)
 $arguments=New-Object object[] 1; $arguments[0]=[string[]]@('8','12','24')
@@ -47,7 +48,7 @@ $refreshHistory=$dll.GetType('SlideSCI.Ribbon1').GetMethod('RefreshTitleHistoryC
 try {
  $historyProperty.SetValue($settingsDefault, (@('A','A','B','C','D','E','F') -join [char]10))
  $null=$refreshHistory.Invoke($ribbon,$null)
- Check ((@($format.Items[0].Items[0].Items | ForEach-Object {$_.Label}) -join ',') -eq 'A,B,C,D,E') 'history deduplicates and limits entries to five'
+ Check ((@($format.Items[0].Items | ForEach-Object {$_.Label}) -join ',') -eq 'A,B,C,D,E') 'history deduplicates and limits entries to five'
 } finally { $historyProperty.SetValue($settingsDefault,$originalHistory); $null=$refreshHistory.Invoke($ribbon,$null) }
 $zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
 Check ($zoom.Items.Count -eq 3) 'zoom keeps three columns'
@@ -67,6 +68,20 @@ foreach($column in @($col1,$col2)) {
  Check (@($menu.Items | Where-Object {$_.Label -eq '无轮廓'}).Count -eq 1) 'no-outline option exists'
  Check (@($menu.Items | Where-Object {$_.Label -eq '箭头'}).Count -eq 1) 'arrow options exist'
  Check (@($menu.Items | Where-Object {$_.Label -eq '取色器'}).Count -eq 1) 'eyedropper entry exists'
+ # 与原生“形状轮廓”一致：条目带图标/预览，虚线、其他轮廓颜色与无轮廓带加速键。
+ $noOutline=@($menu.Items | Where-Object {$_.Label -eq '无轮廓'})[0]
+ Check (($null -ne $noOutline.Image) -and ($noOutline.KeyTip -eq 'N')) 'no-outline item keeps an icon and keytip'
+ $eyedropper=@($menu.Items | Where-Object {$_.Label -eq '取色器'})[0]
+ Check ($null -ne $eyedropper.Image) 'eyedropper item keeps an icon'
+ $moreColors=@($menu.Items | Where-Object {$_.Label -like '其他轮廓颜色*'})[0]
+ Check ($moreColors.OfficeImageId -eq 'ShapeOutlineColorPicker') 'more-colors item reuses the native color-picker icon'
+ $dashMenu=@($menu.Items | Where-Object {$_.Label -eq '虚线'})[0]
+ Check ($dashMenu.KeyTip -eq 'S') 'dashes submenu keeps the native accelerator'
+ $weightMenu=@($menu.Items | Where-Object {$_.Label -eq '粗细'})[0]
+ Check (($weightMenu.OfficeImageId -eq 'LineStyle') -and (@($weightMenu.Items | Where-Object {$_.Image -eq $null}).Count -eq 0)) 'weight submenu items all carry preview icons'
+ Check (($dashMenu.OfficeImageId -eq 'LinePatternGallery') -and (@($dashMenu.Items | Where-Object {$_.Image -eq $null}).Count -eq 0)) 'dash submenu items all carry preview icons'
+ $arrowMenu=@($menu.Items | Where-Object {$_.Label -eq '箭头'})[0]
+ foreach($end in $arrowMenu.Items) { Check (@($end.Items | Where-Object {$_.Image -eq $null}).Count -eq 0) 'arrow submenu items all carry preview icons' }
  $populateStroke=$dll.GetType('SlideSCI.Ribbon1').GetMethod('PopulateStrokeMenu',$flags)
  $before=$menu.Items.Count
  $null=$populateStroke.Invoke($ribbon,@($menu,[Object]::ReferenceEquals($column,$col1)))
@@ -78,7 +93,7 @@ $writer=[Activator]::CreateInstance($writerType,$flags,$null,@('Microsoft.PowerP
 $ns=[Xml.XmlNamespaceManager]::new($xml.NameTable);$ns.AddNamespace('r',$xml.DocumentElement.NamespaceURI)
 $titleXml=$xml.SelectSingleNode('//r:group[@id="图片处理"]',$ns)
 Check ($titleXml.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized title group has three columns'
-Check ($titleXml.SelectSingleNode('./r:box[3]/r:box[3]',$ns).ChildNodes.Count -eq 3) 'serialized font-size, alignment and grouping share the third row'
+Check ($titleXml.SelectSingleNode('./r:box[3]/r:box[1]',$ns).ChildNodes.Count -eq 3) 'serialized font-size, alignment and grouping share the third row'
 Check (@($xml.SelectNodes('//*[@id]') | Group-Object id | Where-Object Count -gt 1).Count -eq 0) 'serialized control IDs are unique'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
 if($CreatePreview) {

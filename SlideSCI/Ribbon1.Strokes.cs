@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Linq;
 using System.Windows.Forms;
@@ -11,7 +12,12 @@ namespace SlideSCI
     public partial class Ribbon1
     {
         private static readonly string[] StrokeDashNames = { "实线", "短划线", "圆点", "短划线-点", "方点", "短划线-双点", "长划线", "长划线-点" };
+        private static readonly float[] StrokeWeightPresets = { 0.25f, 0.5f, 0.75f, 1f, 1.5f, 2.25f, 3f, 4.5f, 6f };
+        private static readonly string[] StrokeArrowNames = { "无箭头", "三角箭头", "开放箭头", "燕尾箭头", "菱形", "椭圆" };
+        // 与 PowerPoint 原生“形状轮廓”菜单相同的 16pt 图标；32px 位图在高 DPI 下仍清晰。
+        private const int StrokePreviewSize = 32;
         private readonly Dictionary<int, Bitmap> strokeSwatches = new Dictionary<int, Bitmap>();
+        private readonly Dictionary<string, Bitmap> strokePreviews = new Dictionary<string, Bitmap>();
 
         private RibbonMenu CreateZoomStrokeMenu(string label, bool box)
         {
@@ -40,13 +46,26 @@ namespace SlideSCI
             var recent = ReadRecentStrokeColors();
             if (recent.Count > 0) AddStrokeGallery(menu, "最近使用的颜色", recent.Select(ColorTranslator.FromOle), box);
             menu.Items.Add(Factory.CreateRibbonSeparator());
-            AddZoomButton(menu, "无轮廓", () => { if (box) zoomRibbonSettings.BoxLineVisible = false; else zoomRibbonSettings.LineVisible = false; });
-            AddZoomButton(menu, "其他轮廓颜色…", () =>
+            int strokeColor = box ? zoomRibbonSettings.BoxColorRgb : zoomRibbonSettings.LineColorRgb;
+
+            // 与原生“形状轮廓”菜单逐项对应：无轮廓、其他轮廓颜色、取色器、粗细、草绘、虚线、箭头。
+            var noOutline = AddZoomButton(menu, "无轮廓", () => { if (box) zoomRibbonSettings.BoxLineVisible = false; else zoomRibbonSettings.LineVisible = false; });
+            noOutline.Image = GetStrokePreview("no-outline", strokeColor);
+            noOutline.ShowImage = true;
+            // 与原生菜单一致：Alt 打开菜单后可直接按键触发。
+            noOutline.KeyTip = "N";
+
+            var moreColors = AddZoomButton(menu, "其他轮廓颜色…", () =>
             {
                 using (var dialog = new ColorDialog { FullOpen = true, Color = ColorTranslator.FromOle(box ? zoomRibbonSettings.BoxColorRgb : zoomRibbonSettings.LineColorRgb) })
                     if (dialog.ShowDialog() == DialogResult.OK) SetZoomColor(box, ColorTranslator.ToOle(dialog.Color));
             });
-            AddZoomButton(menu, "取色器", () =>
+            // 原生菜单使用的调色盘图标（已在本机 PowerPoint 中核对可用）。
+            moreColors.OfficeImageId = "ShapeOutlineColorPicker";
+            moreColors.ShowImage = true;
+            moreColors.KeyTip = "M";
+
+            var eyedropper = AddZoomButton(menu, "取色器", () =>
             {
                 // Defer until Office has dismissed its dropdown. This runs only
                 // after the user explicitly chooses the eyedropper command.
@@ -67,39 +86,58 @@ namespace SlideSCI
                 };
                 timer.Start();
             });
-            var weights = Factory.CreateRibbonMenu(); weights.Label = "粗细";
-            foreach (float weight in new[] { 0.25f, 0.5f, 0.75f, 1f, 1.5f, 2.25f, 3f, 4.5f, 6f })
-                AddZoomButton(weights, weight.ToString("0.##", CultureInfo.CurrentCulture) + " 磅", () =>
+            eyedropper.Image = GetStrokePreview("eyedropper", strokeColor);
+            eyedropper.ShowImage = true;
+
+            var weights = Factory.CreateRibbonMenu();
+            weights.Label = "粗细"; weights.OfficeImageId = "LineStyle"; weights.ShowImage = true;
+            foreach (float weight in StrokeWeightPresets)
+            {
+                float captured = weight;
+                var item = AddZoomButton(weights, weight.ToString("0.##", CultureInfo.CurrentCulture) + " 磅", () =>
                 {
-                    if (box) { zoomRibbonSettings.BoxLineWeight = weight; zoomRibbonSettings.BoxLineVisible = true; }
-                    else { zoomRibbonSettings.LineWeight = weight; zoomRibbonSettings.LineVisible = true; }
+                    if (box) { zoomRibbonSettings.BoxLineWeight = captured; zoomRibbonSettings.BoxLineVisible = true; }
+                    else { zoomRibbonSettings.LineWeight = captured; zoomRibbonSettings.LineVisible = true; }
                 });
+                item.Image = GetStrokePreview("weight:" + weight.ToString(CultureInfo.InvariantCulture), strokeColor, weight);
+                item.ShowImage = true;
+            }
             menu.Items.Add(weights);
+
             // Matches the disabled Sketch entry shown in the reference. Office
             // exposes no portable sketch preset in the targeted VSTO line model.
             var sketch = Factory.CreateRibbonMenu(); sketch.Label = "草绘"; sketch.Enabled = false;
+            sketch.OfficeImageId = "Scribble"; sketch.ShowImage = true;
             sketch.SuperTip = "当前线条预设不支持草绘。";
             var straight = Factory.CreateRibbonButton(); straight.Label = "直线"; sketch.Items.Add(straight);
             menu.Items.Add(sketch);
-            var dashes = Factory.CreateRibbonMenu(); dashes.Label = "虚线";
+
+            var dashes = Factory.CreateRibbonMenu();
+            dashes.Label = "虚线"; dashes.OfficeImageId = "LinePatternGallery"; dashes.ShowImage = true;
+            dashes.KeyTip = "S";
             for (int i = 0; i < StrokeDashNames.Length; i++)
             {
                 int dash = i;
-                AddZoomButton(dashes, StrokeDashNames[i], () => { if (box) zoomRibbonSettings.BoxLineDash = dash; else zoomRibbonSettings.LineDash = dash; });
+                var item = AddZoomButton(dashes, StrokeDashNames[i], () => { if (box) zoomRibbonSettings.BoxLineDash = dash; else zoomRibbonSettings.LineDash = dash; });
+                item.Image = GetStrokePreview("dash:" + dash.ToString(CultureInfo.InvariantCulture), strokeColor);
+                item.ShowImage = true;
             }
             menu.Items.Add(dashes);
+
             var arrows = Factory.CreateRibbonMenu(); arrows.Label = "箭头"; arrows.Enabled = !box;
-            string[] arrowNames = { "无箭头", "三角箭头", "开放箭头", "燕尾箭头", "菱形", "椭圆" };
+            arrows.Image = GetStrokePreview("arrow:2:end", strokeColor); arrows.ShowImage = true;
             foreach (bool begin in new[] { true, false })
             {
                 var end = Factory.CreateRibbonMenu(); end.Label = begin ? "起点" : "终点";
-                for (int i = 0; i < arrowNames.Length; i++)
+                for (int i = 0; i < StrokeArrowNames.Length; i++)
                 {
-                    int value = i + 1;
-                    AddZoomButton(end, arrowNames[i], () =>
+                    int value = i + 1; bool atBegin = begin;
+                    var item = AddZoomButton(end, StrokeArrowNames[i], () =>
                     {
-                        if (begin) zoomRibbonSettings.LineBeginArrow = value; else zoomRibbonSettings.LineEndArrow = value;
+                        if (atBegin) zoomRibbonSettings.LineBeginArrow = value; else zoomRibbonSettings.LineEndArrow = value;
                     });
+                    item.Image = GetStrokePreview("arrow:" + value.ToString(CultureInfo.InvariantCulture) + (begin ? ":begin" : ":end"), strokeColor);
+                    item.ShowImage = true;
                 }
                 arrows.Items.Add(end);
             }
@@ -137,6 +175,112 @@ namespace SlideSCI
                 RefreshZoomLabels(); ZoomSettings.Save(zoomRibbonSettings);
             };
             menu.Items.Add(gallery);
+        }
+
+        /// <summary>
+        /// 绘制与原生“形状轮廓”菜单同风格的条目图标：无轮廓、取色器、粗细预览、
+        /// 虚线预览与箭头预览。位图按颜色缓存，颜色切换后重新生成。
+        /// </summary>
+        private Bitmap GetStrokePreview(string key, int colorRgb, float weight = 1f)
+        {
+            string cacheKey = key + "@" + colorRgb.ToString("X6", CultureInfo.InvariantCulture);
+            if (strokePreviews.TryGetValue(cacheKey, out Bitmap cached)) return cached;
+            Color color = ColorTranslator.FromOle(colorRgb);
+            var bitmap = new Bitmap(StrokePreviewSize, StrokePreviewSize);
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.Clear(Color.Transparent);
+                float left = 5f, right = StrokePreviewSize - 5f, middle = StrokePreviewSize / 2f;
+                if (key.StartsWith("weight:", StringComparison.Ordinal))
+                {
+                    float thickness = Math.Min(10f, Math.Max(1f, weight * 1.6f));
+                    using (var pen = new Pen(color, thickness))
+                        graphics.DrawLine(pen, left, middle, right, middle);
+                }
+                else if (key.StartsWith("dash:", StringComparison.Ordinal))
+                {
+                    int dash = int.Parse(key.Substring(5), CultureInfo.InvariantCulture);
+                    using (var pen = new Pen(color, 1.8f) { DashCap = DashCap.Flat })
+                    {
+                        ApplyPreviewDash(pen, dash);
+                        graphics.DrawLine(pen, left, middle, right, middle);
+                    }
+                }
+                else if (key.StartsWith("arrow:", StringComparison.Ordinal))
+                {
+                    string[] parts = key.Split(':');
+                    int style = parts.Length > 1 && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : 0;
+                    bool atBegin = parts.Length > 2 && parts[2] == "begin";
+                    using (var pen = new Pen(color, 1.8f))
+                    {
+                        graphics.DrawLine(pen, left, middle, right, middle);
+                        if (style > 0)
+                            DrawPreviewArrowHead(graphics, color, new PointF(atBegin ? left : right, middle), atBegin, style);
+                    }
+                }
+                else if (key == "no-outline")
+                {
+                    using (var pen = new Pen(Color.FromArgb(150, 150, 150), 1.6f))
+                        graphics.DrawRectangle(pen, 6f, 6f, StrokePreviewSize - 12f, StrokePreviewSize - 12f);
+                    using (var pen = new Pen(Color.FromArgb(214, 64, 64), 2.2f))
+                        graphics.DrawLine(pen, 5f, StrokePreviewSize - 5f, StrokePreviewSize - 5f, 5f);
+                }
+                else if (key == "eyedropper")
+                {
+                    using (var pen = new Pen(Color.FromArgb(90, 90, 90), 2.2f))
+                    {
+                        graphics.DrawLine(pen, 7f, StrokePreviewSize - 7f, StrokePreviewSize - 11f, 11f);
+                        using (var brush = new SolidBrush(color))
+                            graphics.FillEllipse(brush, StrokePreviewSize - 12f, 5f, 7f, 7f);
+                    }
+                }
+            }
+            strokePreviews[cacheKey] = bitmap;
+            return bitmap;
+        }
+
+        private static void ApplyPreviewDash(Pen pen, int dash)
+        {
+            switch (dash)
+            {
+                case 1: pen.DashPattern = new[] { 3f, 2f }; break;
+                case 2: pen.DashPattern = new[] { 1f, 2f }; pen.DashCap = DashCap.Round; break;
+                case 3: pen.DashPattern = new[] { 3f, 2f, 1f, 2f }; break;
+                case 4: pen.DashPattern = new[] { 1f, 2f }; break;
+                case 5: pen.DashPattern = new[] { 3f, 2f, 1f, 2f, 1f, 2f }; break;
+                case 6: pen.DashPattern = new[] { 5f, 2f }; break;
+                case 7: pen.DashPattern = new[] { 5f, 2f, 1f, 2f }; break;
+                default: pen.DashStyle = DashStyle.Solid; break;
+            }
+        }
+
+        private static void DrawPreviewArrowHead(Graphics graphics, Color color, PointF tip, bool atBegin, int style)
+        {
+            // dx 指向箭头尾部（沿线条向内），所有形状都画在图标范围内。
+            float dx = atBegin ? 1f : -1f;
+            using (var brush = new SolidBrush(color))
+            using (var pen = new Pen(color, 1.6f))
+            {
+                switch (style)
+                {
+                    case 2: // 三角箭头
+                        graphics.FillPolygon(brush, new[] { tip, new PointF(tip.X + dx * 8f, tip.Y - 5f), new PointF(tip.X + dx * 8f, tip.Y + 5f) });
+                        break;
+                    case 3: // 开放箭头
+                        graphics.DrawLines(pen, new[] { new PointF(tip.X + dx * 8f, tip.Y - 5f), tip, new PointF(tip.X + dx * 8f, tip.Y + 5f) });
+                        break;
+                    case 4: // 燕尾箭头
+                        graphics.FillPolygon(brush, new[] { tip, new PointF(tip.X + dx * 8f, tip.Y - 5f), new PointF(tip.X + dx * 4f, tip.Y), new PointF(tip.X + dx * 8f, tip.Y + 5f) });
+                        break;
+                    case 5: // 菱形
+                        graphics.FillPolygon(brush, new[] { tip, new PointF(tip.X + dx * 4f, tip.Y - 4f), new PointF(tip.X + dx * 8f, tip.Y), new PointF(tip.X + dx * 4f, tip.Y + 4f) });
+                        break;
+                    case 6: // 椭圆
+                        graphics.FillEllipse(brush, tip.X + dx * 5f - 4f, tip.Y - 4f, 8f, 8f);
+                        break;
+                }
+            }
         }
 
         private Color[] GetStrokeThemeColors()

@@ -33,7 +33,7 @@ namespace SlideSCI
             var selection = Factory.CreateRibbonBox();
             selection.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
             selection.Items.Add(btnInsertZoomBox);
-            zoomBoxPercentCombo.Label = "尺寸";
+            zoomBoxPercentCombo.Label = LabelInset + "尺寸";
             zoomBoxPercentCombo.SizeString = ZoomNumberSize;
             zoomBoxPercentCombo.Text = zoomRibbonSettings.BoxPercent.ToString("0.##", CultureInfo.CurrentCulture) + "%";
             zoomBoxPercentCombo.ScreenTip = "选区框边长占原图短边的百分比（5–90）";
@@ -54,7 +54,7 @@ namespace SlideSCI
             generate.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
             generate.Items.Add(btnGenerateZoomInset);
             zoomSizeCombo = Factory.CreateRibbonComboBox();
-            zoomSizeCombo.Label = "尺寸";
+            zoomSizeCombo.Label = LabelInset + "尺寸";
             zoomSizeCombo.SizeString = ZoomNumberSize;
             zoomSizeCombo.ScreenTip = "放大图尺寸";
             zoomSizeCombo.SuperTip = "输入放大倍数，如 2 或 2x；默认 1x，始终保持选区宽高比。";
@@ -70,7 +70,7 @@ namespace SlideSCI
             var options = Factory.CreateRibbonBox();
             options.BoxStyle = Microsoft.Office.Tools.Ribbon.RibbonBoxStyle.Vertical;
             zoomGapCombo = Factory.CreateRibbonComboBox();
-            zoomGapCombo.Label = "间距";
+            zoomGapCombo.Label = LabelInset + "间距";
             zoomGapCombo.SizeString = "000";
             zoomGapCombo.Text = ZoomInsetHelper.CmToPoints(zoomRibbonSettings.GapCm).ToString("0.##", CultureInfo.CurrentCulture);
             zoomGapCombo.ScreenTip = "原图与放大图之间的距离 (pt)";
@@ -119,7 +119,9 @@ namespace SlideSCI
         {
             var label = Factory.CreateRibbonLabel();
             label.Name = name + "Label";
-            label.Label = text;
+            // 标签控件没有原生按钮的内缩；补上同样的不可见空格后，同列的
+            // “尺寸/间距”等标签与按钮/菜单文字左端落在同一视觉位置。
+            label.Label = LabelInset + text;
             menu.ShowImage = false;
             menu.ShowLabel = true;
             return CreateRibbonRow(name, label, menu);
@@ -167,11 +169,12 @@ namespace SlideSCI
             var item = Factory.CreateRibbonDropDownItem(); item.Label = value; combo.Items.Add(item);
         }
 
-        private void AddZoomButton(RibbonMenu menu, string label, Action action)
+        private RibbonButton AddZoomButton(RibbonMenu menu, string label, Action action)
         {
             var button = Factory.CreateRibbonButton(); button.Label = label;
             button.Click += (s, e) => { action(); RefreshZoomLabels(); ZoomSettings.Save(zoomRibbonSettings); };
             menu.Items.Add(button);
+            return button;
         }
 
         private ZoomSettings ReadZoomRibbonSettings()
