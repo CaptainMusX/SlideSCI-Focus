@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "2.0.14.0"
+#define AppVersion "2.0.15.0"
 #endif
 
 #ifndef SourceRoot
@@ -107,6 +107,53 @@ begin
     end;
 end;
 
+procedure RemoveLegacyClickOnceUninstallEntries;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  KeyName: String;
+  Value: String;
+begin
+  // A ClickOnce .vsto install leaves a separate uninstall entry. Remove only
+  // entries that point at this fork's VSTO manifest; leave other Office add-ins.
+  if RegGetSubkeyNames(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Uninstall', Names) then
+    for I := GetArrayLength(Names) - 1 downto 0 do
+    begin
+      KeyName := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + Names[I];
+      Value := '';
+      if RegQueryStringValue(HKEY_CURRENT_USER, KeyName, 'UninstallString', Value) and
+         (Pos('vstoinstaller.exe', Lowercase(Value)) > 0) and
+         IsSlideSCIFocusValue(Value) then
+        RemoveRegistration(HKEY_CURRENT_USER, KeyName);
+    end;
+end;
+
+procedure RemoveLegacyVstaSolutions;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  KeyName: String;
+  Value: String;
+begin
+  if RegGetSubkeyNames(HKEY_CURRENT_USER, 'Software\Microsoft\VSTA\Solutions', Names) then
+    for I := GetArrayLength(Names) - 1 downto 0 do
+    begin
+      KeyName := 'Software\Microsoft\VSTA\Solutions\' + Names[I];
+      Value := '';
+      if RegQueryStringValue(HKEY_CURRENT_USER, KeyName, 'Url', Value) and
+         IsSlideSCIFocusValue(Value) then
+        RemoveRegistration(HKEY_CURRENT_USER, KeyName);
+    end;
+end;
+
+procedure RemoveLegacyOfficeMetadata;
+begin
+  RemoveRegistration(HKEY_CURRENT_USER, 'Software\Microsoft\Office\PowerPoint\AddinsData\CaptainMusX.SlideSCI');
+  RemoveRegistration(HKEY_CURRENT_USER, 'Software\Microsoft\Office\PowerPoint\AddinsData\CaptainMusX.SlideSCI.Focus');
+  RemoveRegistration(HKEY_CURRENT_USER, 'Software\Microsoft\Office\16.0\PowerPoint\AddinsData\CaptainMusX.SlideSCI');
+  RemoveRegistration(HKEY_CURRENT_USER, 'Software\Microsoft\Office\16.0\PowerPoint\AddinsData\CaptainMusX.SlideSCI.Focus');
+end;
+
 function CurrentManifestBaseUrl: String;
 var
   AppPath: String;
@@ -158,6 +205,9 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    RemoveLegacyClickOnceUninstallEntries;
+    RemoveLegacyVstaSolutions;
+    RemoveLegacyOfficeMetadata;
     RemoveVstoSlideSCIFocusMetadata;
     RegisterDirectOfficeAddin;
     RegisterVstoInclusion;

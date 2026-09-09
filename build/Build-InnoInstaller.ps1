@@ -81,6 +81,11 @@ if ([string]::IsNullOrWhiteSpace($SourceDirectory))
     $SourceDirectory = Join-Path $repoRoot 'SlideSCI\bin\Release'
 }
 $releasePath = [System.IO.Path]::GetFullPath($SourceDirectory)
+$expectedReleasePath = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'SlideSCI\bin\Release'))
+if (-not $releasePath.Equals($expectedReleasePath, [System.StringComparison]::OrdinalIgnoreCase))
+{
+    throw "最终 Inno 安装包只能从当前 Release 输出构建: $expectedReleasePath；拒绝使用 ClickOnce/artifacts 输出 $releasePath。"
+}
 if (-not (Test-Path -LiteralPath $releasePath -PathType Container))
 {
     throw "Release 输出目录不存在: $releasePath；请先运行 build\Build-Installer.ps1。"
@@ -142,6 +147,28 @@ foreach ($requiredName in @('CaptainMusX.SlideSCI.Focus.vsto', 'CaptainMusX.Slid
 
 $applicationManifestPath = Join-Path $stagingPath 'CaptainMusX.SlideSCI.Focus.dll.manifest'
 [xml]$applicationManifest = Get-Content -LiteralPath $applicationManifestPath -Raw
+$applicationIdentityNode = $applicationManifest.SelectSingleNode('//*[local-name()="assemblyIdentity"][@type="win32"]')
+if (-not $applicationIdentityNode -or
+    [string]$applicationIdentityNode.name -ne 'CaptainMusX.SlideSCI.Focus.dll' -or
+    [string]$applicationIdentityNode.version -ne $appVersion)
+{
+    throw "应用清单身份/版本与项目不一致；拒绝生成可能触发 ClickOnce 冲突的安装包。"
+}
+
+$deploymentManifestPath = Join-Path $stagingPath 'CaptainMusX.SlideSCI.Focus.vsto'
+[xml]$deploymentManifest = Get-Content -LiteralPath $deploymentManifestPath -Raw
+$deploymentIdentityNode = $deploymentManifest.SelectSingleNode('//*[local-name()="assemblyIdentity"][@name="CaptainMusX.SlideSCI.Focus.vsto"]')
+$deploymentNode = $deploymentManifest.SelectSingleNode('//*[local-name()="deployment"]')
+$dependentAssemblyNode = $deploymentManifest.SelectSingleNode('//*[local-name()="dependentAssembly"][@dependencyType="install"]')
+if (-not $deploymentIdentityNode -or
+    [string]$deploymentIdentityNode.version -ne $appVersion -or
+    -not $deploymentNode -or [string]$deploymentNode.install -ne 'false' -or
+    -not $dependentAssemblyNode -or
+    [string]$dependentAssemblyNode.codebase -ne 'CaptainMusX.SlideSCI.Focus.dll.manifest')
+{
+    throw "VSTO 清单不是直接部署布局或身份/版本不一致；请使用 bin\\Release 的当前构建。"
+}
+
 $rsaKeyNode = $applicationManifest.SelectSingleNode('//*[local-name()="RSAKeyValue"]')
 if (-not $rsaKeyNode)
 {
@@ -234,6 +261,17 @@ if ($signToolPath -and (Test-Path -LiteralPath $pfxPath -PathType Leaf))
 
 $hash = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash
 $size = (Get-Item -LiteralPath $setupPath).Length
+$usageNoticePath = Join-Path $outputPath ("SlideSCI-Focus-{0}-INSTALL.txt" -f $appVersion)
+$usageNotice = @(
+    'SlideSCI Focus 最终安装器使用说明',
+    '',
+    "只运行本目录中的 $([System.IO.Path]::GetFileName($setupPath))。",
+    '不要运行 artifacts\\SlideSCI-Focus-<版本>\\setup.exe，也不要双击其中的 .vsto；那是 MSBuild/ClickOnce 中间产物。',
+    '不要使用 VSTOInstaller.exe 安装 .vsto；Inno 安装器会直接部署文件并注册 PowerPoint 加载项。',
+    "安装器 SHA-256: $hash",
+    "默认安装目录: %LOCALAPPDATA%\\Programs\\SlideSCI Focus"
+)
+[System.IO.File]::WriteAllLines($usageNoticePath, $usageNotice, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
 [pscustomobject]@{
     ReleaseDirectory = $releasePath
     StagingDirectory = $stagingPath
@@ -244,4 +282,5 @@ $size = (Get-Item -LiteralPath $setupPath).Length
     SignTool = $signToolPath
     Signature = $signatureResult
     Log = $logPath
+    UsageNotice = $usageNoticePath
 }

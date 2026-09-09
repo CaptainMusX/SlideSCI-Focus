@@ -282,6 +282,16 @@ if ($deploymentText -notmatch "<Signature" -or $deploymentText -notmatch "publis
     throw "部署清单未检测到签名信息。"
 }
 
+$installationNoticePath = Join-Path $outputPath "DO-NOT-INSTALL-DIRECTLY.txt"
+$installationNotice = @(
+    '该目录是 MSBuild VSTO/ClickOnce 发布中间产物，不是最终交付安装包。',
+    '',
+    '不要运行本目录中的 setup.exe，也不要双击 .vsto；这样会创建 ClickOnce 订阅，可能与 SlideSCI Focus 的直部署安装器冲突。',
+    '最终安装请使用 artifacts\\inno\\SlideSCI-Focus-<版本>-Setup.exe。',
+    '最终 Inno 安装器会从 SlideSCI\\bin\\Release 直接部署文件并注册 PowerPoint 加载项。'
+)
+[System.IO.File]::WriteAllLines($installationNoticePath, $installationNotice, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+
 $checksumPath = Join-Path $outputPath "SHA256SUMS.txt"
 $checksumLines = Get-ChildItem -LiteralPath $outputPath -Recurse -File |
     Where-Object { $_.FullName -ne $checksumPath } |
