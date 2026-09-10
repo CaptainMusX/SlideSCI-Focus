@@ -1,3 +1,8 @@
+## v2.0.16 / 20260910
+- 「添加图片标题」第三列的标题、字体、字号/对齐/编组三行统一使用横向 RibbonBox，消除前两行裸控件与第三行容器混排的结构差异；第三行仍保留三个控件的原顺序，不增加第四列。
+- 保留前两列、输入宽度、标题历史与事件绑定；更新实际 Release Ribbon 对象及序列化 XML 回归，检查第三列恰好三个横向行。
+- 此改动统一第三列内部的布局方式，不宣称与裸控件组成的“列数量”列像素级一致。历史记录中的 152px/4px 是特定环境的测量，不是通用物理上限；未进行 UI 自动化或新版本人工视觉验收。
+
 ## v2.0.15 / 20260909
 - 修复 2.0.14 发布后安装链路混用 ClickOnce `.vsto/setup.exe` 与 Inno 直部署导致的 `AddInAlreadyInstalledException`：最终 Inno 打包强制使用当前 `SlideSCI/bin/Release`，校验直接 VSTO 清单身份/版本/布局，并在中间产物与最终安装目录写入明确的使用提示。
 - Inno 安装器清理本 fork 遗留的 ClickOnce VSTO 卸载项、VSTA 方案与 PowerPoint AddinsData 后，再注册唯一的 `CaptainMusX.SlideSCI.Focus` 加载项；不触碰其他插件。

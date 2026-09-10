@@ -60,8 +60,8 @@ namespace SlideSCI
             图片处理.Items.Add(horizontal);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleHorizontalSeparator"));
 
-            // 第三列：标题/字体保持裸 ComboBox（与“列数量”列相同的 52pt 行距），
-            // 第三行用横向容器容纳字号、对齐与编组三个控件。
+            // 第三列三行统一使用横向容器，避免裸 ComboBox 与复合行
+            // 采用不同的行距计算。实际像素高度由 Office/DPI 决定。
             titleTextEditBox.Label = TitleLabelInset + "标题";
             titleTextEditBox.SizeString = TitleWideSize;
             titleTextEditBox.ScreenTip = "标题文字";
@@ -72,8 +72,8 @@ namespace SlideSCI
             fontSizeEditBox.SuperTip = "可直接输入字号，也可从下拉列表选择预设值。";
             var format = Factory.CreateRibbonBox(); format.BoxStyle = RibbonBoxStyle.Vertical;
             format.Name = "titleFormatColumn";
-            format.Items.Add(titleTextEditBox);
-            format.Items.Add(fontNameEditBox);
+            format.Items.Add(CreateRibbonRow("titleTextRow", titleTextEditBox));
+            format.Items.Add(CreateRibbonRow("titleFontRow", fontNameEditBox));
             图片处理.Items.Add(format);
 
             // 对齐与编组留在第三列第三行。
