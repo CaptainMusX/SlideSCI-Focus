@@ -2,7 +2,7 @@
 - 「添加图片标签」的垂直偏移 / 水平偏移由输入框改为与「添加图片标题」一致的 ComboBox：外观（输入框 + 下拉箭头）与预设下拉数值（-20/-10/-5/0/5/10/20）完全统一，仍可手动输入任意数值。
 - 偏移输入宽度调整为 `0000`（与“列数量”同宽），真实渲染实测右边界与第三行两个切换按钮的右边界完全对齐（均为 1405 物理像素）；标签文字仍保留 thin space + hair space 内缩。
 - 回归检查：`tests/Run-TitleRibbonLayout.ps1` 108 项通过（新增偏移控件类型、输入宽度与预设断言），`tests/Run-CoreRegression.ps1` 26 项通过；真实 PowerPoint 渲染 + UI Automation 核对第三列两行为 1311/1405（94 物理像素控件），与第二列及“列数量”一致。
-- 本轮按要求不生成新安装包、不安装新版本；真实加载项下的下拉交互仍需人工验收。
+- 按用户要求随后生成 2.0.19.0 安装包：`F:\SlideSCI\artifacts\inno\SlideSCI-Focus-2.0.19.0-Setup.exe`（3,486,176 字节，SHA-256 9F540B8444B76A8C39CC9AF57EFE6773305214B88AC0B68A9B20DFB6F87ED589），signtool 用本地开发证书成功签名（Authenticode 链终止于本机自签根证书，非公共信任链）。构建前检查了机器上 2.0.13/2.0.14 时代的 ClickOnce 遗留（D:\Program Files (x86)\SlideSCI Focus、VSTO Inclusion/SolutionMetadata 旧路径），2.0.15 起 Inno 脚本在安装时统一清理并只注册当前直接部署布局；安装与真实 Office 冷启动验收仍待进行。
 
 ## v2.0.18 / 20260910
 - 「添加图片标签」分组重排为三列 × 三行，沿用「添加图片标题」已验证的行结构：每列前两行保持裸控件（原生行距），第三行用横向 RibbonBox，使三列第三行落在同一条基线上。
