@@ -56,36 +56,30 @@ try {
  Check ((@($formatRows[0].Items | ForEach-Object {$_.Label}) -join ',') -eq 'A,B,C,D,E') 'history deduplicates and limits entries to five'
 } finally { $historyProperty.SetValue($settingsDefault,$originalHistory); $null=$refreshHistory.Invoke($ribbon,$null) }
 $labels=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'group1'}
-Check ($labels.Items.Count -eq 5) 'label group is three columns plus two separators'
-$labelCols=@($labels.Items[0],$labels.Items[2],$labels.Items[4])
-foreach($column in $labelCols) {
- Check ($column.BoxStyle.ToString() -eq 'Vertical' -and $column.Items.Count -eq 3) 'label column packs exactly three rows'
- Check ($column.Items[2].BoxStyle.ToString() -eq 'Horizontal' -and $column.Items[2].Items.Count -ge 1) 'label third row uses a horizontal container'
-}
-$labelActions=$labelCols[0]
-Check ($labelActions.Items[0].Name -eq 'addLabelsButton' -and $labelActions.Items[1].Name -eq 'updateLabelsButton') 'add and update labels keep their order'
-foreach($button in @($labelActions.Items[0],$labelActions.Items[1])) {
+Check ($labels.Items.Count -eq 9) 'label group flows nine direct rows in three native columns'
+function RowControl($row) { if($row.PSObject.Properties['BoxStyle'] -and $row.BoxStyle.ToString() -eq 'Horizontal'){return $row.Items[0]}; return $row }
+Check (@($labels.Items | Where-Object {$_.PSObject.Properties['BoxStyle'] -and $_.BoxStyle.ToString() -eq 'Vertical'}).Count -eq 0) 'no vertical packing boxes in the label group'
+Check (@($labels.Items | Where-Object {$_.GetType().Name -match 'Separator'}).Count -eq 0) 'no column separators in the label group'
+foreach($row in $labels.Items) { Check ([Object]::ReferenceEquals($row.Parent,$labels)) 'every label row is a direct group child' }
+foreach($button in @($labels.Items[0],$labels.Items[1])) {
  Check ($button.ControlSize.ToString() -eq 'RibbonControlSizeRegular' -and $button.ShowImage -and $button.ShowLabel) 'label actions are regular icon-and-text buttons'
 }
-Check (@($labelActions.Items | Where-Object {$_.Label -eq '添加标签' -or $_.Label -eq '更新标签'}).Count -eq 2) 'label action labels preserved'
-Check ($labelActions.Items[2].Items[0].Name -eq 'labelFontNameEditBox' -and $labelActions.Items[2].Items[0].Label.EndsWith('字体')) 'font combo is the third row of the first column'
-function RowControl($row) { if($row.PSObject.Properties['BoxStyle'] -and $row.BoxStyle.ToString() -eq 'Horizontal'){return $row.Items[0]}; return $row }
-$labelNumbers=$labelCols[1]
-Check (@($labelNumbers.Items | ForEach-Object {(RowControl $_).Name}) -join ',' -eq 'labelFontSizeEditBox,labelTemplateComboBox,labelIndex') 'font size, template and index keep their order'
-foreach($row in $labelNumbers.Items) { Check ((RowControl $row).SizeString -eq '0000') 'second column inputs match the 列数量 input width' }
-Check ((RowControl $labelNumbers.Items[2]).GetType().Name -match 'ComboBox') 'label index is a dropdown input'
-Check ((RowControl $labelNumbers.Items[2]).Items.Count -eq 20) 'label index offers numeric presets'
-Check (((RowControl $labelNumbers.Items[0]).Label.EndsWith('字号')) -and ((RowControl $labelNumbers.Items[1]).Label.EndsWith('模板')) -and ((RowControl $labelNumbers.Items[2]).Label.EndsWith('编号'))) 'second column labels are 字号/模板/编号'
-$labelOffsets=$labelCols[2]
-Check ((RowControl $labelOffsets.Items[0]).Name -eq 'labelOffsetYEditBox' -and (RowControl $labelOffsets.Items[0]).Label.EndsWith('垂直偏移')) 'vertical offset is the first row'
-Check ((RowControl $labelOffsets.Items[1]).Name -eq 'labelOffsetXEditBox' -and (RowControl $labelOffsets.Items[1]).Label.EndsWith('水平偏移')) 'horizontal offset is the second row'
-Check ((RowControl $labelOffsets.Items[0]).SizeString -eq (RowControl $labelOffsets.Items[1]).SizeString) 'both offset inputs use the same width'
-Check ((RowControl $labelOffsets.Items[0]).SizeString -eq '0000' -and (RowControl $labelOffsets.Items[1]).SizeString -eq '0000') 'offset combos keep the 列数量 input width'
-Check (@((RowControl $labelOffsets.Items[0]).GetType().Name,(RowControl $labelOffsets.Items[1]).GetType().Name | Where-Object {$_ -match 'ComboBox'}).Count -eq 2) 'offset inputs are dropdown combos like the title group'
-Check ((@((RowControl $labelOffsets.Items[0]).Items | ForEach-Object {$_.Label}) -join ',') -eq '-20,-10,-5,0,5,10,20') 'offset presets match the title group values'
-Check ($labelOffsets.Items[2].Items.Count -eq 2) 'third row holds two controls'
-Check (@($labelOffsets.Items[2].Items | ForEach-Object {$_.Label}) -join ',' -eq '加粗,编号自动更新') 'bold and auto-update labels preserved'
-foreach($toggle in $labelOffsets.Items[2].Items) {
+Check (@($labels.Items[0].Label,$labels.Items[1].Label) -join ',' -eq '添加标签,更新标签') 'add and update labels keep their order'
+Check ($labels.Items[2].Name -eq 'labelFontNameEditBox' -and $labels.Items[2].Label.EndsWith('字体') -and $labels.Items[2].SizeString -eq '0000') 'font combo is the third row of the first native column'
+Check (@($labels.Items[3].Name,$labels.Items[4].Name,$labels.Items[5].Name) -join ',' -eq 'labelFontSizeEditBox,labelTemplateComboBox,labelIndex') 'font size, template and index keep their order'
+foreach($row in @($labels.Items[3],$labels.Items[4],$labels.Items[5])) { Check ((RowControl $row).SizeString -eq '0000') 'second column inputs match the 列数量 input width' }
+Check ($labels.Items[5].GetType().Name -match 'ComboBox' -and $labels.Items[5].Items.Count -eq 20) 'label index is a dropdown input with numeric presets'
+Check ($labels.Items[3].Label.EndsWith('字号') -and $labels.Items[4].Label.EndsWith('模板') -and $labels.Items[5].Label.EndsWith('编号')) 'second column labels are 字号/模板/编号'
+$offsetY=$labels.Items[6]; $offsetX=$labels.Items[7]
+Check ($offsetY.Name -eq 'labelOffsetYEditBox' -and $offsetY.Label.EndsWith('垂直偏移')) 'vertical offset is the first row of column three'
+Check ($offsetX.Name -eq 'labelOffsetXEditBox' -and $offsetX.Label.EndsWith('水平偏移')) 'horizontal offset is the second row of column three'
+Check ($offsetY.SizeString -eq $offsetX.SizeString) 'both offset inputs use the same width'
+Check (-not ($offsetY.SizeString -eq '0000') -and -not ($offsetX.SizeString -eq '0000')) 'offset inputs are widened beyond the number width'
+Check ($offsetY.GetType().Name -match 'ComboBox' -and $offsetX.GetType().Name -match 'ComboBox') 'offset inputs are dropdown combos like the title group'
+Check ((@($offsetY.Items | ForEach-Object {$_.Label}) -join ',') -eq '-20,-10,-5,0,5,10,20') 'offset presets match the title group values'
+Check ($labels.Items[8].BoxStyle.ToString() -eq 'Horizontal' -and $labels.Items[8].Items.Count -eq 2) 'only the third row of column three uses a horizontal container'
+Check (@($labels.Items[8].Items | ForEach-Object {$_.Label}) -join ',' -eq '加粗,编号自动更新') 'bold and auto-update labels preserved'
+foreach($toggle in $labels.Items[8].Items) {
  Check ($toggle.GetType().Name -match 'ToggleButton' -and -not $toggle.ShowImage -and $toggle.ShowLabel) 'third row controls are text-only toggle buttons'
 }
 $zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
@@ -136,10 +130,10 @@ Check ($titleXml.SelectNodes('.//r:box[@id="titleFormatColumn"]',$ns).Count -eq 
 Check ($titleXml.SelectNodes('./r:box[@id="titleFormatRow"]',$ns).Count -eq 1) 'composite formatting row is directly in the group'
 Check ($titleXml.SelectSingleNode('./r:box[@id="titleFormatRow"]',$ns).ChildNodes.Count -eq 3) 'serialized third row keeps font size, alignment and grouping together'
 $labelXml=$xml.SelectSingleNode('//r:group[@id="group1"]',$ns)
-Check ($labelXml.SelectNodes('./r:box[@boxStyle="vertical"]',$ns).Count -eq 3) 'label group serializes three vertical columns'
-Check ($labelXml.SelectNodes('./r:separator',$ns).Count -eq 2) 'label columns stay separated in serialized XML'
-Check ($labelXml.SelectNodes('./r:box[@boxStyle="vertical"]/r:box[@boxStyle="horizontal"]',$ns).Count -eq 3) 'every label column ends with a horizontal row'
-Check ($labelXml.SelectNodes('.//r:comboBox[@sizeString="0000"]',$ns).Count -ge 5) 'label combo boxes keep the 列数量 input width in XML'
+Check ($labelXml.SelectNodes('./r:box[@boxStyle="vertical"]',$ns).Count -eq 0) 'label group has no vertical packing boxes in XML'
+Check ($labelXml.SelectNodes('./r:separator',$ns).Count -eq 0) 'label group has no separators in XML'
+Check ($labelXml.SelectNodes('./r:box[@boxStyle="horizontal"]',$ns).Count -eq 1) 'only the flags row uses a horizontal container in XML'
+Check ($labelXml.SelectNodes('./r:comboBox[@sizeString="0000"]',$ns).Count -eq 4) 'label combo boxes keep the 列数量 input width in XML';
 Check (@($xml.SelectNodes('//*[@id]') | Group-Object id | Where-Object Count -gt 1).Count -eq 0) 'serialized control IDs are unique'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
 if($CreatePreview) {

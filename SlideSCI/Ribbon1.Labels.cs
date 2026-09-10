@@ -10,9 +10,9 @@ namespace SlideSCI
         private const string LabelNumberSize = "0000";
         // 第一列第三行“字体”的输入宽度：与其它输入框一致，使该行总宽度等于上面两行的按钮宽度。
         private const string LabelFontNameSize = "0000";
-        // 第三列前两行的偏移输入宽度：ComboBox 带下拉箭头，`0000` 使输入框右边界
-        // 与第三行两个切换按钮的右边界对齐（真实渲染实测与第二列“列数量”同宽）。
-        private const string LabelOffsetSize = "0000";
+        // 第三列前两行的偏移输入宽度：加宽输入框，使“标签文字 + 正常间隙 + 输入框”
+        // 的总宽度与第三行两个切换按钮一致（右边界对齐、文字与输入框之间不留大空档）。
+        private const string LabelOffsetSize = "000000";
         private static readonly string[] LabelOffsetPresets =
         {
             "-20", "-10", "-5", "0", "5", "10", "20"
@@ -25,34 +25,20 @@ namespace SlideSCI
         };
 
         /// <summary>
-        /// 重排「添加图片标签」分组：三列 × 三行。
+        /// 排布「添加图片标签」分组：九项直接交给 group 排布，每三行一列——
         /// 第一列 添加标签 / 更新标签 / 字体；第二列 字号 / 模板 / 编号；
         /// 第三列 垂直偏移 / 水平偏移 / 加粗 + 编号自动更新。
-        /// 行结构沿用「添加图片标题」分组的已验证做法：前两行保持裸控件以获得原生
-        /// 行距，第三行用横向 RibbonBox 承载，使三列第三行落在同一条基线上。
+        /// 与「图片自动排列」的“列数量”列一致：全部使用 group 的原生三行行距，
+        /// 不在列之间加分割线；只有第三列第三行用横向 RibbonBox 容纳两个切换按钮。
         /// </summary>
         private void InitializeLabelRibbon()
         {
             group1.Items.Clear();
 
-            // ── 第一列：添加标签 / 更新标签 / 字体 ──
-            var actions = Factory.CreateRibbonBox();
-            actions.Name = "labelActionColumn";
-            actions.BoxStyle = RibbonBoxStyle.Vertical;
             ConfigureLabelButton(addLabelsButton, "添加标签", "为选中的图片添加编号标签，编号从“编号”输入框开始递增");
             ConfigureLabelButton(updateLabelsButton, "更新标签", "按当前的字体、字号、模板与偏移重新生成选中图片的标签");
-            actions.Items.Add(addLabelsButton);
-            actions.Items.Add(updateLabelsButton);
             labelFontNameEditBox.Label = LabelTextInset + "字体";
             labelFontNameEditBox.SizeString = LabelFontNameSize;
-            actions.Items.Add(CreateRibbonRow("labelFontRow", labelFontNameEditBox));
-            group1.Items.Add(actions);
-            group1.Items.Add(CreateTitleColumnSeparator("labelActionSeparator"));
-
-            // ── 第二列：字号 / 模板 / 编号：与“列数量”相同的可输入下拉框与输入宽度 ──
-            var numbers = Factory.CreateRibbonBox();
-            numbers.Name = "labelNumberColumn";
-            numbers.BoxStyle = RibbonBoxStyle.Vertical;
             labelFontSizeEditBox.Label = LabelTextInset + "字号";
             labelFontSizeEditBox.SizeString = LabelNumberSize;
             labelFontSizeEditBox.ScreenTip = "标签字号 (pt)";
@@ -65,17 +51,6 @@ namespace SlideSCI
             labelIndex.SizeString = LabelNumberSize;
             labelIndex.ScreenTip = "起始编号";
             labelIndex.SuperTip = "下一个标签使用的编号；开启“编号自动更新”后每次添加标签自动递增。";
-            PopulateLabelIndexPresets();
-            numbers.Items.Add(labelFontSizeEditBox);
-            numbers.Items.Add(labelTemplateComboBox);
-            numbers.Items.Add(CreateRibbonRow("labelIndexRow", labelIndex));
-            group1.Items.Add(numbers);
-            group1.Items.Add(CreateTitleColumnSeparator("labelOffsetSeparator"));
-
-            // ── 第三列：垂直偏移 / 水平偏移 / 加粗 + 编号自动更新 ──
-            var offsets = Factory.CreateRibbonBox();
-            offsets.Name = "labelOffsetColumn";
-            offsets.BoxStyle = RibbonBoxStyle.Vertical;
             labelOffsetYEditBox.Label = LabelTextInset + "垂直偏移";
             labelOffsetYEditBox.SizeString = LabelOffsetSize;
             labelOffsetYEditBox.ScreenTip = "垂直偏移 (pt)";
@@ -84,14 +59,20 @@ namespace SlideSCI
             labelOffsetXEditBox.SizeString = LabelOffsetSize;
             labelOffsetXEditBox.ScreenTip = "水平偏移 (pt)";
             labelOffsetXEditBox.SuperTip = "正值向右，负值向左；与垂直偏移叠加，可输入任意数值。";
-            PopulateLabelOffsetPresets();
-            offsets.Items.Add(labelOffsetYEditBox);
-            offsets.Items.Add(labelOffsetXEditBox);
-            // 加粗与编号自动更新改为切换按钮，与「添加图片标题」的“编组”一致。
             ConfigureLabelToggle(labelBoldcheckBox, "加粗", "标签文字加粗");
             ConfigureLabelToggle(labelIndexUpdatecheckBox, "编号自动更新", "添加标签后自动把“编号”更新为下一个可用编号");
-            offsets.Items.Add(CreateRibbonRow("labelFlagsRow", labelBoldcheckBox, labelIndexUpdatecheckBox));
-            group1.Items.Add(offsets);
+            PopulateLabelIndexPresets();
+            PopulateLabelOffsetPresets();
+
+            group1.Items.Add(addLabelsButton);
+            group1.Items.Add(updateLabelsButton);
+            group1.Items.Add(labelFontNameEditBox);
+            group1.Items.Add(labelFontSizeEditBox);
+            group1.Items.Add(labelTemplateComboBox);
+            group1.Items.Add(labelIndex);
+            group1.Items.Add(labelOffsetYEditBox);
+            group1.Items.Add(labelOffsetXEditBox);
+            group1.Items.Add(CreateRibbonRow("labelFlagsRow", labelBoldcheckBox, labelIndexUpdatecheckBox));
         }
 
         /// <summary>小按钮：左图标右文字，样式与「添加图片标题」的“添加上标题”一致。</summary>
