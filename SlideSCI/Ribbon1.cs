@@ -4827,6 +4827,7 @@ namespace SlideSCI
             // Create export options dialog
             using (Form exportDialog = new Form())
             {
+                ScientificUiTheme.ConfigureDialog(exportDialog);
                 exportDialog.Text = "导出设置";
                 exportDialog.Width = 400;
                 exportDialog.Height = 380; // Increase height for new PDF options and checkbox
@@ -4988,6 +4989,8 @@ namespace SlideSCI
                 );
                 exportDialog.AcceptButton = okButton;
                 exportDialog.CancelButton = cancelButton;
+                // 所有控件就位后再装备 96 DPI 基准缩放，避免高 DPI 下文字被截断/压缩。
+                ScientificUiTheme.CompleteCodeBuiltLayout(exportDialog);
 
                 if (exportDialog.ShowDialog() == DialogResult.OK)
                 {

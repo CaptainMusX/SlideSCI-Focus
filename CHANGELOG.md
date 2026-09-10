@@ -1,3 +1,10 @@
+## v2.0.21 / 20260910
+- 「导出与选择」分组从 SciFigure 功能区移到 SciStudio 功能区（位于“科研文本”之后、“关于”之前），SciFigure 减少一组、避免右侧被窗口裁掉。
+- 逐项梳理该分组五个功能并补齐按钮体验：导出页面（修正原本错误的提示“将选中的图片导出为文件”→ 实际是导页面，新增 SuperTip）、导出原图（新增 FileSave 图标与说明）、复制大图（新增 Copy 图标与说明）、图文同缩（新增 PictureCompress 图标与说明）、全选文本框（补充 SuperTip）；五个按钮全部带图标，风格统一。
+- 修复弹窗文字截断/压缩问题（根因：弹窗按 96 DPI 硬编码像素排版，而字体随显示器 DPI（200%）放大、控件框不放大）：导出设置弹窗与「图文同缩」「对齐间距设置」两个窗口统一改用 `ScientificUiTheme` 的 96 DPI 基准自动缩放（`AutoScaleMode.Dpi + AutoScaleDimensions(96,96)`，控件全部就位后装备缩放，与「局部放大」弹窗同款方案）。
+- 回归检查：`tests/Run-TitleRibbonLayout.ps1` 125 项通过（新增导出分组所在选项卡、图标、提示、序列化 XML 断言），`tests/Run-CoreRegression.ps1` 26 项通过；真实 PowerPoint 渲染确认五个按钮图标全部显示、行列与按钮宽度统一；图标 ID 先用等效 customUI 渲染探测（Copy / FileSave / PictureCompress / TextBoxInsert 有效，FitToScreen / ExportSlides 无效弃用）。
+- 生成 2.0.21.0 安装包；弹窗在用户 200% 缩放下的人工验收待安装后进行。
+
 ## v2.0.20 / 20260910
 - 按用户真实安装后的反馈继续收敛「添加图片标签」分组布局：
   1. 移除两列之间的分割线，三列直接由 group 原生列排布；

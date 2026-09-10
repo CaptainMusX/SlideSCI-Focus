@@ -258,7 +258,6 @@ namespace SlideSCI
             this.tab2.Groups.Add(this.zoomGroup);
             this.tab2.Groups.Add(this.图片处理);
             this.tab2.Groups.Add(this.group1);
-            this.tab2.Groups.Add(this.group3);
             this.tab2.Label = "SciFigure";
             this.tab2.Name = "CaptainMusX_SlideSCIFocus_SciFigure";
             this.tab2.ControlId.ControlIdType = Microsoft.Office.Tools.Ribbon.RibbonControlIdType.Custom;
@@ -654,6 +653,7 @@ namespace SlideSCI
             this.tab1.Groups.Add(this.复制图片格式);
             this.tab1.Groups.Add(this.排列);
             this.tab1.Groups.Add(this.codeGroup);
+            this.tab1.Groups.Add(this.group3);
             this.tab1.Groups.Add(this.group2);
             this.tab1.Label = "SciStudio";
             this.tab1.Name = "CaptainMusX_SlideSCIFocus_SciStudio";
@@ -794,7 +794,8 @@ namespace SlideSCI
             this.exportImageButton.Image = ((System.Drawing.Image)(resources.GetObject("exportImageButton.Image")));
             this.exportImageButton.Label = "导出页面";
             this.exportImageButton.Name = "exportImageButton";
-            this.exportImageButton.ScreenTip = "将选中的图片导出为文件";
+            this.exportImageButton.ScreenTip = "导出幻灯片";
+            this.exportImageButton.SuperTip = "把当前页、选中的页面或全部页面导出为 PNG / JPG / BMP / PDF，可选导出分辨率。";
             this.exportImageButton.ShowImage = true;
             this.exportImageButton.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.exportImageButton_Click);
             // 
@@ -802,19 +803,30 @@ namespace SlideSCI
             // 
             this.导出原图.Label = "导出原图";
             this.导出原图.Name = "导出原图";
+            this.导出原图.OfficeImageId = "FileSave";
+            this.导出原图.ScreenTip = "导出原始图片";
+            this.导出原图.SuperTip = "把选中图片在演示文稿里嵌入的原始图片文件原样导出，不经过 PowerPoint 的缩放与重采样。";
+            this.导出原图.ShowImage = true;
             this.导出原图.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.ExportOriginalImage_Click);
             // 
             // 复制大图
             // 
             this.复制大图.Label = "复制大图";
             this.复制大图.Name = "复制大图";
+            this.复制大图.OfficeImageId = "Copy";
+            this.复制大图.ScreenTip = "复制大图";
+            this.复制大图.SuperTip = "把选中图片按整页高度放大后复制到剪贴板（原图在幻灯片上的尺寸和位置保持不变）。";
+            this.复制大图.ShowImage = true;
             this.复制大图.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.CopyOriginalPicture_Click);
             // 
             // button1
             // 
             this.button1.Label = "图文同缩";
             this.button1.Name = "button1";
-            this.button1.ScreenTip = "组合后，调整组合形状，文字也会同步缩放";
+            this.button1.OfficeImageId = "PictureCompress";
+            this.button1.ScreenTip = "图文同缩";
+            this.button1.SuperTip = "打开“图文同缩”窗口：调整形状大小时，形状内的文字字号按比例同步缩放，保持图文比例一致。";
+            this.button1.ShowImage = true;
             this.button1.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.pastePictureAndText);
             // 
             // selectAllTextBoxesButton
@@ -822,7 +834,8 @@ namespace SlideSCI
             this.selectAllTextBoxesButton.Label = "全选文本框";
             this.selectAllTextBoxesButton.Name = "selectAllTextBoxesButton";
             this.selectAllTextBoxesButton.OfficeImageId = "TextBoxInsert";
-            this.selectAllTextBoxesButton.ScreenTip = "全选当前幻灯片上的所有文本框";
+            this.selectAllTextBoxesButton.ScreenTip = "全选文本框";
+            this.selectAllTextBoxesButton.SuperTip = "按形状顺序选中当前幻灯片上的所有文本框和包含文本的占位符。";
             this.selectAllTextBoxesButton.ShowImage = true;
             this.selectAllTextBoxesButton.Click += new Microsoft.Office.Tools.Ribbon.RibbonControlEventHandler(this.selectAllTextBoxesButton_Click);
             // 

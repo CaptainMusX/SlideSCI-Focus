@@ -147,6 +147,8 @@ namespace SlideSCI
             btnClose.FlatAppearance.MouseOverBackColor = Color.FromArgb(200, 200, 200);
             btnClose.Click += (s, e) => this.Close();
             this.Controls.Add(btnClose);
+            // 所有控件就位后再装备 96 DPI 基准缩放，避免高 DPI 下文字被截断/压缩。
+            ScientificUiTheme.CompleteCodeBuiltLayout(this);
         }
 
         private void DrawCardBorder(object sender, PaintEventArgs e)

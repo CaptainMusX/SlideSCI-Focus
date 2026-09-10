@@ -82,6 +82,15 @@ Check (@($labels.Items[8].Items | ForEach-Object {$_.Label}) -join ',' -eq '加�
 foreach($toggle in $labels.Items[8].Items) {
  Check ($toggle.GetType().Name -match 'ToggleButton' -and -not $toggle.ShowImage -and $toggle.ShowLabel) 'third row controls are text-only toggle buttons'
 }
+$exportGroup=$ribbon.Tabs[1].Groups | Where-Object {$_.Name -eq 'group3'}
+Check ($exportGroup.Label -eq '导出与选择') 'export group moved to the SciStudio tab'
+Check (@($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'group3'}).Count -eq 0) 'export group is gone from the SciFigure tab'
+Check (@($ribbon.Tabs[1].Groups).Count -eq 5) 'SciStudio tab keeps five groups'
+Check (@($ribbon.Tabs[1].Groups)[4].Name -eq 'group2') 'about group stays last on the SciStudio tab'
+Check ($exportGroup.Items.Count -eq 5) 'export group keeps its five actions'
+foreach($button in $exportGroup.Items) { Check ($button.ShowImage) 'every export action shows an icon' }
+Check ($exportGroup.Items[0].ScreenTip -eq '导出幻灯片' -and $exportGroup.Items[0].SuperTip -match 'PNG') 'export-page tooltip describes slide export'
+Check ($exportGroup.Items[1].OfficeImageId -eq 'FileSave' -and $exportGroup.Items[2].OfficeImageId -eq 'Copy' -and $exportGroup.Items[3].OfficeImageId -eq 'PictureCompress') 'export actions use native icon ids'
 $zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
 Check ($zoom.Items.Count -eq 3) 'zoom keeps three columns'
 $col1=$zoom.Items[0];$col2=$zoom.Items[1];$col3=$zoom.Items[2]
@@ -133,7 +142,10 @@ $labelXml=$xml.SelectSingleNode('//r:group[@id="group1"]',$ns)
 Check ($labelXml.SelectNodes('./r:box[@boxStyle="vertical"]',$ns).Count -eq 0) 'label group has no vertical packing boxes in XML'
 Check ($labelXml.SelectNodes('./r:separator',$ns).Count -eq 0) 'label group has no separators in XML'
 Check ($labelXml.SelectNodes('./r:box[@boxStyle="horizontal"]',$ns).Count -eq 1) 'only the flags row uses a horizontal container in XML'
-Check ($labelXml.SelectNodes('./r:comboBox[@sizeString="0000"]',$ns).Count -eq 4) 'label combo boxes keep the 列数量 input width in XML';
+Check ($labelXml.SelectNodes('./r:comboBox[@sizeString="0000"]',$ns).Count -eq 4) 'label combo boxes keep the 列数量 input width in XML'
+$exportXml=$xml.SelectSingleNode('//r:tab[@id="CaptainMusX_SlideSCIFocus_SciStudio"]/r:group[@id="group3"]',$ns)
+Check ($null -ne $exportXml) 'serialized export group lives in the SciStudio tab XML'
+Check (@($exportXml.ChildNodes | Where-Object {$_.LocalName -eq 'button'}).Count -eq 5) 'serialized export group keeps five buttons';
 Check (@($xml.SelectNodes('//*[@id]') | Group-Object id | Where-Object Count -gt 1).Count -eq 0) 'serialized control IDs are unique'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
 if($CreatePreview) {
@@ -143,12 +155,14 @@ if($CreatePreview) {
  Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片自动对齐'})
  Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'})
  Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'group1'})
+ Collect ($ribbon.Tabs[1].Groups | Where-Object {$_.Name -eq 'group3'})
  $tabs=$xml.SelectSingleNode('//r:tabs',$ns)
  $tab=$xml.CreateElement('tab',$xml.DocumentElement.NamespaceURI); $tab.SetAttribute('id','LayoutPreview'); $tab.SetAttribute('label','布局验收')
  $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="图片自动对齐"]',$ns).CloneNode($true))
  $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="zoomGroup"]',$ns).CloneNode($true))
  $null=$tab.AppendChild($titleXml.CloneNode($true))
  $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="group1"]',$ns).CloneNode($true))
+ $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="group3"]',$ns).CloneNode($true))
  $tabs.RemoveAll(); $null=$tabs.AppendChild($tab)
  $images=@{}; $imageIndex=0
  foreach($element in @($xml.SelectNodes('//*'))) {
