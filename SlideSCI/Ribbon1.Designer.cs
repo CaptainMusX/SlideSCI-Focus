@@ -1,4 +1,4 @@
-﻿namespace SlideSCI
+namespace SlideSCI
 {
     partial class Ribbon1 : Microsoft.Office.Tools.Ribbon.RibbonBase
     {
@@ -18,6 +18,7 @@
             InitializeComponent();
             InitializeZoomRibbon();
             InitializeTitleRibbon();
+            InitializeLabelRibbon();
         }
 
         /// <summary> 
@@ -160,9 +161,9 @@
             this.labelTemplateComboBox = this.Factory.CreateRibbonComboBox();
             this.labelOffsetYEditBox = this.Factory.CreateRibbonEditBox();
             this.labelOffsetXEditBox = this.Factory.CreateRibbonEditBox();
-            this.labelBoldcheckBox = this.Factory.CreateRibbonCheckBox();
-            this.labelIndex = this.Factory.CreateRibbonEditBox();
-            this.labelIndexUpdatecheckBox = this.Factory.CreateRibbonCheckBox();
+            this.labelBoldcheckBox = this.Factory.CreateRibbonToggleButton();
+            this.labelIndex = this.Factory.CreateRibbonComboBox();
+            this.labelIndexUpdatecheckBox = this.Factory.CreateRibbonToggleButton();
             this.group3 = this.Factory.CreateRibbonGroup();
             this.tab1 = this.Factory.CreateRibbonTab();
             this.复制图片格式 = this.Factory.CreateRibbonGroup();
@@ -1317,7 +1318,7 @@
         internal Microsoft.Office.Tools.Ribbon.RibbonDropDown imgAutoAlignAlignTypeDropDown;
         internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox excludeTextcheckBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup group1;
-        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox labelBoldcheckBox;
+        internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton labelBoldcheckBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox imgAutoAlign_rowSpace;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox imgAutoAlign_colNum;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox imgAutoAlign_colSpace;
@@ -1401,9 +1402,9 @@
         internal Microsoft.Office.Tools.Ribbon.RibbonButton 复制大图;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton 导出原图;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton 图片上标题;
-        internal Microsoft.Office.Tools.Ribbon.RibbonEditBox labelIndex;
+        internal Microsoft.Office.Tools.Ribbon.RibbonComboBox labelIndex;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton updateLabelsButton;
-        internal Microsoft.Office.Tools.Ribbon.RibbonCheckBox labelIndexUpdatecheckBox;
+        internal Microsoft.Office.Tools.Ribbon.RibbonToggleButton labelIndexUpdatecheckBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton button8;
         internal Microsoft.Office.Tools.Ribbon.RibbonSeparator separator5;
         internal Microsoft.Office.Tools.Ribbon.RibbonSeparator separator6;

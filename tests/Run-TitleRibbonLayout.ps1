@@ -1,4 +1,4 @@
-﻿<# Source/serialized-Ribbon regression only. -CreatePreview creates a separate
+<# Source/serialized-Ribbon regression only. -CreatePreview creates a separate
    static PPTX for manual inspection; these checks do not prove pixel alignment. #>
 [CmdletBinding()]
 param([switch]$CreatePreview)
@@ -55,6 +55,36 @@ try {
  $null=$refreshHistory.Invoke($ribbon,$null)
  Check ((@($formatRows[0].Items | ForEach-Object {$_.Label}) -join ',') -eq 'A,B,C,D,E') 'history deduplicates and limits entries to five'
 } finally { $historyProperty.SetValue($settingsDefault,$originalHistory); $null=$refreshHistory.Invoke($ribbon,$null) }
+$labels=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'group1'}
+Check ($labels.Items.Count -eq 5) 'label group is three columns plus two separators'
+$labelCols=@($labels.Items[0],$labels.Items[2],$labels.Items[4])
+foreach($column in $labelCols) {
+ Check ($column.BoxStyle.ToString() -eq 'Vertical' -and $column.Items.Count -eq 3) 'label column packs exactly three rows'
+ Check ($column.Items[2].BoxStyle.ToString() -eq 'Horizontal' -and $column.Items[2].Items.Count -ge 1) 'label third row uses a horizontal container'
+}
+$labelActions=$labelCols[0]
+Check ($labelActions.Items[0].Name -eq 'addLabelsButton' -and $labelActions.Items[1].Name -eq 'updateLabelsButton') 'add and update labels keep their order'
+foreach($button in @($labelActions.Items[0],$labelActions.Items[1])) {
+ Check ($button.ControlSize.ToString() -eq 'RibbonControlSizeRegular' -and $button.ShowImage -and $button.ShowLabel) 'label actions are regular icon-and-text buttons'
+}
+Check (@($labelActions.Items | Where-Object {$_.Label -eq '添加标签' -or $_.Label -eq '更新标签'}).Count -eq 2) 'label action labels preserved'
+Check ($labelActions.Items[2].Items[0].Name -eq 'labelFontNameEditBox' -and $labelActions.Items[2].Items[0].Label.EndsWith('字体')) 'font combo is the third row of the first column'
+function RowControl($row) { if($row.PSObject.Properties['BoxStyle'] -and $row.BoxStyle.ToString() -eq 'Horizontal'){return $row.Items[0]}; return $row }
+$labelNumbers=$labelCols[1]
+Check (@($labelNumbers.Items | ForEach-Object {(RowControl $_).Name}) -join ',' -eq 'labelFontSizeEditBox,labelTemplateComboBox,labelIndex') 'font size, template and index keep their order'
+foreach($row in $labelNumbers.Items) { Check ((RowControl $row).SizeString -eq '0000') 'second column inputs match the 列数量 input width' }
+Check ((RowControl $labelNumbers.Items[2]).GetType().Name -match 'ComboBox') 'label index is a dropdown input'
+Check ((RowControl $labelNumbers.Items[2]).Items.Count -eq 20) 'label index offers numeric presets'
+Check (((RowControl $labelNumbers.Items[0]).Label.EndsWith('字号')) -and ((RowControl $labelNumbers.Items[1]).Label.EndsWith('模板')) -and ((RowControl $labelNumbers.Items[2]).Label.EndsWith('编号'))) 'second column labels are 字号/模板/编号'
+$labelOffsets=$labelCols[2]
+Check ((RowControl $labelOffsets.Items[0]).Name -eq 'labelOffsetYEditBox' -and (RowControl $labelOffsets.Items[0]).Label.EndsWith('垂直偏移')) 'vertical offset is the first row'
+Check ((RowControl $labelOffsets.Items[1]).Name -eq 'labelOffsetXEditBox' -and (RowControl $labelOffsets.Items[1]).Label.EndsWith('水平偏移')) 'horizontal offset is the second row'
+Check ((RowControl $labelOffsets.Items[0]).SizeString -eq (RowControl $labelOffsets.Items[1]).SizeString) 'both offset inputs use the same width'
+Check ($labelOffsets.Items[2].Items.Count -eq 2) 'third row holds two controls'
+Check (@($labelOffsets.Items[2].Items | ForEach-Object {$_.Label}) -join ',' -eq '加粗,编号自动更新') 'bold and auto-update labels preserved'
+foreach($toggle in $labelOffsets.Items[2].Items) {
+ Check ($toggle.GetType().Name -match 'ToggleButton' -and -not $toggle.ShowImage -and $toggle.ShowLabel) 'third row controls are text-only toggle buttons'
+}
 $zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
 Check ($zoom.Items.Count -eq 3) 'zoom keeps three columns'
 $col1=$zoom.Items[0];$col2=$zoom.Items[1];$col3=$zoom.Items[2]
@@ -102,6 +132,11 @@ Check ($titleXml.SelectNodes('./r:comboBox',$ns).Count -eq 2) 'title and font ar
 Check ($titleXml.SelectNodes('.//r:box[@id="titleFormatColumn"]',$ns).Count -eq 0) 'old vertical format wrapper is absent'
 Check ($titleXml.SelectNodes('./r:box[@id="titleFormatRow"]',$ns).Count -eq 1) 'composite formatting row is directly in the group'
 Check ($titleXml.SelectSingleNode('./r:box[@id="titleFormatRow"]',$ns).ChildNodes.Count -eq 3) 'serialized third row keeps font size, alignment and grouping together'
+$labelXml=$xml.SelectSingleNode('//r:group[@id="group1"]',$ns)
+Check ($labelXml.SelectNodes('./r:box[@boxStyle="vertical"]',$ns).Count -eq 3) 'label group serializes three vertical columns'
+Check ($labelXml.SelectNodes('./r:separator',$ns).Count -eq 2) 'label columns stay separated in serialized XML'
+Check ($labelXml.SelectNodes('./r:box[@boxStyle="vertical"]/r:box[@boxStyle="horizontal"]',$ns).Count -eq 3) 'every label column ends with a horizontal row'
+Check ($labelXml.SelectNodes('.//r:comboBox[@sizeString="0000"]',$ns).Count -ge 3) 'second label column keeps the 列数量 input width in XML'
 Check (@($xml.SelectNodes('//*[@id]') | Group-Object id | Where-Object Count -gt 1).Count -eq 0) 'serialized control IDs are unique'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
 if($CreatePreview) {
@@ -110,11 +145,13 @@ if($CreatePreview) {
  Collect $group
  Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片自动对齐'})
  Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'})
+ Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'group1'})
  $tabs=$xml.SelectSingleNode('//r:tabs',$ns)
  $tab=$xml.CreateElement('tab',$xml.DocumentElement.NamespaceURI); $tab.SetAttribute('id','LayoutPreview'); $tab.SetAttribute('label','布局验收')
  $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="图片自动对齐"]',$ns).CloneNode($true))
  $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="zoomGroup"]',$ns).CloneNode($true))
  $null=$tab.AppendChild($titleXml.CloneNode($true))
+ $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="group1"]',$ns).CloneNode($true))
  $tabs.RemoveAll(); $null=$tabs.AppendChild($tab)
  $images=@{}; $imageIndex=0
  foreach($element in @($xml.SelectNodes('//*'))) {
