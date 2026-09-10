@@ -60,8 +60,9 @@ namespace SlideSCI
             图片处理.Items.Add(horizontal);
             图片处理.Items.Add(CreateTitleColumnSeparator("titleHorizontalSeparator"));
 
-            // 第三列三行统一使用横向容器，避免裸 ComboBox 与复合行
-            // 采用不同的行距计算。实际像素高度由 Office/DPI 决定。
+            // Let the group allocate its native row slots, as for 列数量/列间距/行间距.
+            // A vertical box packs child rows instead of using that group spacing.
+            // Only the last row needs a horizontal box to keep its three controls together.
             titleTextEditBox.Label = TitleLabelInset + "标题";
             titleTextEditBox.SizeString = TitleWideSize;
             titleTextEditBox.ScreenTip = "标题文字";
@@ -70,11 +71,8 @@ namespace SlideSCI
             fontSizeEditBox.Label = TitleLabelInset + "字号"; fontSizeEditBox.SizeString = TitleNumberSize;
             fontSizeEditBox.ScreenTip = "标题字号 (pt)";
             fontSizeEditBox.SuperTip = "可直接输入字号，也可从下拉列表选择预设值。";
-            var format = Factory.CreateRibbonBox(); format.BoxStyle = RibbonBoxStyle.Vertical;
-            format.Name = "titleFormatColumn";
-            format.Items.Add(CreateRibbonRow("titleTextRow", titleTextEditBox));
-            format.Items.Add(CreateRibbonRow("titleFontRow", fontNameEditBox));
-            图片处理.Items.Add(format);
+            图片处理.Items.Add(titleTextEditBox);
+            图片处理.Items.Add(fontNameEditBox);
 
             // 对齐与编组留在第三列第三行。
             autoGroupCheckBox.ControlSize = Office.RibbonControlSize.RibbonControlSizeRegular;
@@ -95,7 +93,7 @@ namespace SlideSCI
                 titleAlignmentMenu.Items.Add(choice);
             }
             SetTitleAlignment(1);
-            format.Items.Add(CreateRibbonRow("titleFormatRow", fontSizeEditBox, titleAlignmentMenu, autoGroupCheckBox));
+            图片处理.Items.Add(CreateRibbonRow("titleFormatRow", fontSizeEditBox, titleAlignmentMenu, autoGroupCheckBox));
 
             PopulateTitleFontSizePresets(TitleFontSizePresets);
         }

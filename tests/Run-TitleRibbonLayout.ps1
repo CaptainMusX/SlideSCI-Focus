@@ -19,24 +19,25 @@ Check ($ribbon.Tabs[1].ControlId.CustomId -eq 'CaptainMusX_SlideSCIFocus_SciStud
 $align=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片自动对齐'}
 Check (@($align.Items | Where-Object {$_.SizeString -eq '0000'}).Count -eq 5) 'auto-arrangement input widths preserved'
 $group=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq '图片处理'}
-Check ($group.Items.Count -eq 5) 'title group has three columns and two separators'
-$left=$group.Items[0]; $right=$group.Items[2]; $format=$group.Items[4]
+Check ($group.Items.Count -eq 7) 'title group has two action columns, two separators and three native format rows'
+$left=$group.Items[0]; $right=$group.Items[2]; $formatRows=@($group.Items[4],$group.Items[5],$group.Items[6])
 foreach($column in @($left,$right)) {
  Check ($column.Items.Count -eq 3) 'title column has three rows'
  foreach($row in @($column.Items[0],$column.Items[1])) { Check (-not $row.PSObject.Properties['BoxStyle']) 'title rows 1-2 stay bare for the native 4px row gap' }
  Check ($column.Items[2].BoxStyle.ToString() -eq 'Horizontal') 'title row 3 keeps a horizontal container'
 }
-Check ($format.Items.Count -eq 3) 'format column has exactly three rows'
-foreach($row in $format.Items) { Check ($row.BoxStyle.ToString() -eq 'Horizontal') 'format rows all use horizontal containers' }
-Check ($format.Items[0].Items.Count -eq 1 -and $format.Items[1].Items.Count -eq 1) 'title and font each occupy one complete row'
-Check ($format.Items[0].Items[0].Name -eq 'titleTextEditBox' -and $format.Items[1].Items[0].Name -eq 'fontNameEditBox') 'title and font remain in the first two rows'
+Check ($formatRows.Count -eq 3) 'format has exactly three native group rows'
+foreach($row in @($formatRows[0],$formatRows[1])) { Check (-not $row.PSObject.Properties['BoxStyle']) 'first two format rows are native controls directly in the group' }
+Check ($formatRows[0].Name -eq 'titleTextEditBox' -and $formatRows[1].Name -eq 'fontNameEditBox') 'title and font retain row order'
+Check ($formatRows[2].BoxStyle.ToString() -eq 'Horizontal') 'only the composite third row uses a horizontal box'
+foreach($row in $formatRows) { Check ([Object]::ReferenceEquals($row.Parent,$group)) 'format row belongs directly to the group instead of a packing box' }
 Check ($left.Items[2].Items[0].Label.EndsWith('垂直偏移') -and $right.Items[2].Items[0].Label.EndsWith('水平偏移')) 'offset controls preserved'
-Check ($format.Items[2].Items.Count -eq 3) 'third title row contains exactly three controls'
-$size=$format.Items[2].Items[0]; $alignment=$format.Items[2].Items[1]; $grouping=$format.Items[2].Items[2]
+Check ($formatRows[2].Items.Count -eq 3) 'third title row contains exactly three controls'
+$size=$formatRows[2].Items[0]; $alignment=$formatRows[2].Items[1]; $grouping=$formatRows[2].Items[2]
 Check ($size.Label.EndsWith('字号') -and $size.GetType().Name -match 'ComboBox') 'complete editable font-size combo remains first'
 Check ($alignment.Name -eq 'titleAlignmentMenu' -and $alignment.Items.Count -eq 4) 'alignment menu remains second'
 Check ($grouping.Label -eq '编组' -and $grouping.GetType().Name -match 'Toggle') 'grouping toggle remains third'
-Check ($format.Items[0].Items[0].SizeString -eq $format.Items[1].Items[0].SizeString) 'title and font have matching input widths'
+Check ($formatRows[0].SizeString -eq $formatRows[1].SizeString) 'title and font have matching input widths'
 Check ($size.Items.Count -eq 29 -and $size.Items[0].Label -eq '2' -and $size.Items[28].Label -eq '200') 'font-size presets preserved'
 $populate=$dll.GetType('SlideSCI.Ribbon1').GetMethod('PopulateTitleFontSizePresets',$flags)
 $arguments=New-Object object[] 1; $arguments[0]=[string[]]@('8','12','24')
@@ -52,7 +53,7 @@ $refreshHistory=$dll.GetType('SlideSCI.Ribbon1').GetMethod('RefreshTitleHistoryC
 try {
  $historyProperty.SetValue($settingsDefault, (@('A','A','B','C','D','E','F') -join [char]10))
  $null=$refreshHistory.Invoke($ribbon,$null)
- Check ((@($format.Items[0].Items[0].Items | ForEach-Object {$_.Label}) -join ',') -eq 'A,B,C,D,E') 'history deduplicates and limits entries to five'
+ Check ((@($formatRows[0].Items | ForEach-Object {$_.Label}) -join ',') -eq 'A,B,C,D,E') 'history deduplicates and limits entries to five'
 } finally { $historyProperty.SetValue($settingsDefault,$originalHistory); $null=$refreshHistory.Invoke($ribbon,$null) }
 $zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
 Check ($zoom.Items.Count -eq 3) 'zoom keeps three columns'
@@ -96,10 +97,11 @@ $writer=[Activator]::CreateInstance($writerType,$flags,$null,@('Microsoft.PowerP
 [xml]$xml=$writerType.GetProperty('RibbonXml',$flags).GetValue($writer,$null)
 $ns=[Xml.XmlNamespaceManager]::new($xml.NameTable);$ns.AddNamespace('r',$xml.DocumentElement.NamespaceURI)
 $titleXml=$xml.SelectSingleNode('//r:group[@id="图片处理"]',$ns)
-Check ($titleXml.SelectNodes('./r:box',$ns).Count -eq 3) 'serialized title group has three columns'
-Check ($titleXml.SelectNodes('./r:box[3]/r:box[@boxStyle="horizontal"]',$ns).Count -eq 3) 'serialized format column has three horizontal rows'
-Check ($titleXml.SelectNodes('./r:box[3]/*',$ns).Count -eq 3) 'no bare controls or extra rows in serialized format column'
-Check ($titleXml.SelectSingleNode('./r:box[3]/r:box[3]',$ns).ChildNodes.Count -eq 3) 'serialized font-size, alignment and grouping share the third row'
+Check ($titleXml.SelectNodes('./r:box[@boxStyle="vertical"]',$ns).Count -eq 2) 'only action columns have vertical packing boxes'
+Check ($titleXml.SelectNodes('./r:comboBox',$ns).Count -eq 2) 'title and font are direct group controls in serialized XML'
+Check ($titleXml.SelectNodes('.//r:box[@id="titleFormatColumn"]',$ns).Count -eq 0) 'old vertical format wrapper is absent'
+Check ($titleXml.SelectNodes('./r:box[@id="titleFormatRow"]',$ns).Count -eq 1) 'composite formatting row is directly in the group'
+Check ($titleXml.SelectSingleNode('./r:box[@id="titleFormatRow"]',$ns).ChildNodes.Count -eq 3) 'serialized third row keeps font size, alignment and grouping together'
 Check (@($xml.SelectNodes('//*[@id]') | Group-Object id | Where-Object Count -gt 1).Count -eq 0) 'serialized control IDs are unique'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
 if($CreatePreview) {
