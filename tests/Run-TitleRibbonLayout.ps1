@@ -91,6 +91,23 @@ Check ($exportGroup.Items.Count -eq 5) 'export group keeps its five actions'
 foreach($button in $exportGroup.Items) { Check ($button.ShowImage) 'every export action shows an icon' }
 Check ($exportGroup.Items[0].ScreenTip -eq '导出幻灯片' -and $exportGroup.Items[0].SuperTip -match 'PNG') 'export-page tooltip describes slide export'
 Check ($exportGroup.Items[1].OfficeImageId -eq 'FileSave' -and $exportGroup.Items[2].OfficeImageId -eq 'Copy' -and $exportGroup.Items[3].OfficeImageId -eq 'PictureCompress') 'export actions use native icon ids'
+$format=$ribbon.Tabs[1].Groups | Where-Object {$_.Name -eq '复制图片格式'}
+Check ($format.Label -eq '格式属性') 'format group renamed to 格式属性'
+Check ($format.Items.Count -eq 7) 'format group is two subgroups plus the position column and two separators'
+Check ($format.Items[0].BoxStyle.ToString() -eq 'Vertical' -and $format.Items[6].BoxStyle.ToString() -eq 'Vertical') 'format subgroups are vertical boxes'
+Check ($format.Items[0].Items.Count -eq 3 -and $format.Items[6].Items.Count -eq 3) 'each format subgroup has three rows'
+foreach($column in @($format.Items[0],$format.Items[6])) {
+ foreach($row in $column.Items) {
+  Check ($row.BoxStyle.ToString() -eq 'Horizontal' -and $row.Items.Count -eq 3) 'format rows are attribute+copy+paste triples'
+  $label=$row.Items[0]; $copy=$row.Items[1]; $paste=$row.Items[2]
+  Check ($label.Enabled -eq $false -and $label.ShowImage -and $label.ShowLabel) 'attribute label is a read-only icon label'
+  Check ($copy.Label -eq '复制' -and $paste.Label -eq '粘贴' -and -not $copy.ShowImage -and -not $paste.ShowImage) 'copy/paste are plain text buttons'
+ }
+}
+Check (@($format.Items[0].Items | ForEach-Object {$_.Items[0].Label}) -join ',' -eq '形状,文字,组合') 'first subgroup attributes are 形状/文字/组合'
+Check (@($format.Items[6].Items | ForEach-Object {$_.Items[0].Label}) -join ',' -eq '宽度,高度,裁剪') 'third subgroup attributes are 宽度/高度/裁剪'
+Check ($format.Items[2].Name -eq 'copyPosition' -and $format.Items[3].Name -eq 'pastePosition' -and $format.Items[4].Name -eq 'swapPosition') 'position buttons keep their place'
+Check ($format.Items[2].GetType().Name -match 'SplitButton' -and $format.Items[2].Items.Count -eq 9) 'copy-position split menu keeps its nine anchors'
 $zoom=$ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'}
 Check ($zoom.Items.Count -eq 3) 'zoom keeps three columns'
 $col1=$zoom.Items[0];$col2=$zoom.Items[1];$col3=$zoom.Items[2]
@@ -145,7 +162,11 @@ Check ($labelXml.SelectNodes('./r:box[@boxStyle="horizontal"]',$ns).Count -eq 1)
 Check ($labelXml.SelectNodes('./r:comboBox[@sizeString="0000"]',$ns).Count -eq 4) 'label combo boxes keep the 列数量 input width in XML'
 $exportXml=$xml.SelectSingleNode('//r:tab[@id="CaptainMusX_SlideSCIFocus_SciStudio"]/r:group[@id="group3"]',$ns)
 Check ($null -ne $exportXml) 'serialized export group lives in the SciStudio tab XML'
-Check (@($exportXml.ChildNodes | Where-Object {$_.LocalName -eq 'button'}).Count -eq 5) 'serialized export group keeps five buttons';
+Check (@($exportXml.ChildNodes | Where-Object {$_.LocalName -eq 'button'}).Count -eq 5) 'serialized export group keeps five buttons'
+$formatXml=$xml.SelectSingleNode('//r:tab[@id="CaptainMusX_SlideSCIFocus_SciStudio"]/r:group[@id="复制图片格式"]',$ns)
+Check ($formatXml.SelectNodes('./r:box[@boxStyle="vertical"]',$ns).Count -eq 2) 'format group serializes two subgroup columns'
+Check ($formatXml.SelectNodes('./r:separator',$ns).Count -eq 2) 'format group serializes two separators'
+Check ($formatXml.SelectNodes('./r:box[@boxStyle="vertical"]/r:box[@boxStyle="horizontal"]',$ns).Count -eq 6) 'format rows serialize as six horizontal boxes';
 Check (@($xml.SelectNodes('//*[@id]') | Group-Object id | Where-Object Count -gt 1).Count -eq 0) 'serialized control IDs are unique'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
 if($CreatePreview) {
@@ -156,6 +177,7 @@ if($CreatePreview) {
  Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'zoomGroup'})
  Collect ($ribbon.Tabs[0].Groups | Where-Object {$_.Name -eq 'group1'})
  Collect ($ribbon.Tabs[1].Groups | Where-Object {$_.Name -eq 'group3'})
+ Collect ($ribbon.Tabs[1].Groups | Where-Object {$_.Name -eq '复制图片格式'})
  $tabs=$xml.SelectSingleNode('//r:tabs',$ns)
  $tab=$xml.CreateElement('tab',$xml.DocumentElement.NamespaceURI); $tab.SetAttribute('id','LayoutPreview'); $tab.SetAttribute('label','布局验收')
  $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="图片自动对齐"]',$ns).CloneNode($true))
@@ -163,6 +185,7 @@ if($CreatePreview) {
  $null=$tab.AppendChild($titleXml.CloneNode($true))
  $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="group1"]',$ns).CloneNode($true))
  $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="group3"]',$ns).CloneNode($true))
+ $null=$tab.AppendChild($xml.SelectSingleNode('//r:group[@id="复制图片格式"]',$ns).CloneNode($true))
  $tabs.RemoveAll(); $null=$tabs.AppendChild($tab)
  $images=@{}; $imageIndex=0
  foreach($element in @($xml.SelectNodes('//*'))) {

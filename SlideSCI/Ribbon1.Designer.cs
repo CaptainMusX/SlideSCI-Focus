@@ -19,6 +19,7 @@ namespace SlideSCI
             InitializeZoomRibbon();
             InitializeTitleRibbon();
             InitializeLabelRibbon();
+            InitializeFormatRibbon();
         }
 
         /// <summary> 

@@ -77,6 +77,7 @@ namespace SlideSCI
             {
                 Location = new Point(15, 15),
                 AutoSize = true, // Auto-size to prevent clipping
+                MaximumSize = new Size(274, 0), // 防止超长状态文字把弹窗撑宽
                 ForeColor = ScientificUiTheme.TextPrimary,
                 Font = ScientificUiTheme.ChineseBodyFont(9F, FontStyle.Bold),
                 Text = "正在读取当前选中的形状..."

@@ -35,7 +35,7 @@
     <PublishUrl>publish\</PublishUrl>
     <InstallUrl />
     <TargetCulture>zh-chs</TargetCulture>
-    <ApplicationVersion>2.0.21.0</ApplicationVersion>
+    <ApplicationVersion>2.0.22.0</ApplicationVersion>
     <AutoIncrementApplicationRevision>false</AutoIncrementApplicationRevision>
     <UpdateEnabled>true</UpdateEnabled>
     <UpdateInterval>7</UpdateInterval>
@@ -241,6 +241,7 @@
     </Compile>
     <Compile Include="Ribbon1.Zoom.cs" />
     <Compile Include="Ribbon1.Strokes.cs" />
+    <Compile Include="Ribbon1.Format.cs" />
     <Compile Include="Ribbon1.Labels.cs" />
     <Compile Include="Ribbon1.Titles.cs" />
     <Compile Include="components\PictureTitleHelper.cs" />
