@@ -159,8 +159,8 @@ namespace SlideSCI
             this.labelFontSizeEditBox = this.Factory.CreateRibbonComboBox();
             this.labelFontNameEditBox = this.Factory.CreateRibbonComboBox();
             this.labelTemplateComboBox = this.Factory.CreateRibbonComboBox();
-            this.labelOffsetYEditBox = this.Factory.CreateRibbonEditBox();
-            this.labelOffsetXEditBox = this.Factory.CreateRibbonEditBox();
+            this.labelOffsetYEditBox = this.Factory.CreateRibbonComboBox();
+            this.labelOffsetXEditBox = this.Factory.CreateRibbonComboBox();
             this.labelBoldcheckBox = this.Factory.CreateRibbonToggleButton();
             this.labelIndex = this.Factory.CreateRibbonComboBox();
             this.labelIndexUpdatecheckBox = this.Factory.CreateRibbonToggleButton();
@@ -1333,8 +1333,8 @@ namespace SlideSCI
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnInsertZoomBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton btnGenerateZoomInset;
         internal Microsoft.Office.Tools.Ribbon.RibbonComboBox zoomBoxPercentCombo;
-        internal Microsoft.Office.Tools.Ribbon.RibbonEditBox labelOffsetYEditBox;
-        internal Microsoft.Office.Tools.Ribbon.RibbonEditBox labelOffsetXEditBox;
+        internal Microsoft.Office.Tools.Ribbon.RibbonComboBox labelOffsetYEditBox;
+        internal Microsoft.Office.Tools.Ribbon.RibbonComboBox labelOffsetXEditBox;
         internal Microsoft.Office.Tools.Ribbon.RibbonButton exportImageButton; // 添加按钮声明
         internal Microsoft.Office.Tools.Ribbon.RibbonTab tab1;
         internal Microsoft.Office.Tools.Ribbon.RibbonGroup 复制图片格式;

@@ -10,8 +10,13 @@ namespace SlideSCI
         private const string LabelNumberSize = "0000";
         // 第一列第三行“字体”的输入宽度：与其它输入框一致，使该行总宽度等于上面两行的按钮宽度。
         private const string LabelFontNameSize = "0000";
-        // 第三列前两行的偏移输入宽度：使输入框右边界与第三行两个切换按钮的右边界对齐。
-        private const string LabelOffsetSize = "000000";
+        // 第三列前两行的偏移输入宽度：ComboBox 带下拉箭头，`0000` 使输入框右边界
+        // 与第三行两个切换按钮的右边界对齐（真实渲染实测与第二列“列数量”同宽）。
+        private const string LabelOffsetSize = "0000";
+        private static readonly string[] LabelOffsetPresets =
+        {
+            "-20", "-10", "-5", "0", "5", "10", "20"
+        };
         private const string LabelTextInset = LabelInset;
         private static readonly string[] LabelIndexPresets =
         {
@@ -74,11 +79,12 @@ namespace SlideSCI
             labelOffsetYEditBox.Label = LabelTextInset + "垂直偏移";
             labelOffsetYEditBox.SizeString = LabelOffsetSize;
             labelOffsetYEditBox.ScreenTip = "垂直偏移 (pt)";
-            labelOffsetYEditBox.SuperTip = "正值向下，负值向上；与水平偏移叠加。";
+            labelOffsetYEditBox.SuperTip = "正值向下，负值向上；与水平偏移叠加，可输入任意数值。";
             labelOffsetXEditBox.Label = LabelTextInset + "水平偏移";
             labelOffsetXEditBox.SizeString = LabelOffsetSize;
             labelOffsetXEditBox.ScreenTip = "水平偏移 (pt)";
-            labelOffsetXEditBox.SuperTip = "正值向右，负值向左；与垂直偏移叠加。";
+            labelOffsetXEditBox.SuperTip = "正值向右，负值向左；与垂直偏移叠加，可输入任意数值。";
+            PopulateLabelOffsetPresets();
             offsets.Items.Add(labelOffsetYEditBox);
             offsets.Items.Add(labelOffsetXEditBox);
             // 加粗与编号自动更新改为切换按钮，与「添加图片标题」的“编组”一致。
@@ -108,6 +114,20 @@ namespace SlideSCI
             toggle.ShowLabel = true;
             toggle.ScreenTip = label;
             toggle.SuperTip = superTip;
+        }
+
+        /// <summary>“垂直/水平偏移”下拉列表：与「添加图片标题」的偏移预设完全一致。</summary>
+        private void PopulateLabelOffsetPresets()
+        {
+            labelOffsetYEditBox.Items.Clear();
+            labelOffsetXEditBox.Items.Clear();
+            foreach (string value in LabelOffsetPresets)
+            {
+                var itemY = Factory.CreateRibbonDropDownItem(); itemY.Label = value;
+                var itemX = Factory.CreateRibbonDropDownItem(); itemX.Label = value;
+                labelOffsetYEditBox.Items.Add(itemY);
+                labelOffsetXEditBox.Items.Add(itemX);
+            }
         }
 
         /// <summary>“编号”下拉列表：仍然可以手动输入列表以外的编号。</summary>

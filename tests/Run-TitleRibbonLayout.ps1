@@ -80,6 +80,9 @@ $labelOffsets=$labelCols[2]
 Check ((RowControl $labelOffsets.Items[0]).Name -eq 'labelOffsetYEditBox' -and (RowControl $labelOffsets.Items[0]).Label.EndsWith('垂直偏移')) 'vertical offset is the first row'
 Check ((RowControl $labelOffsets.Items[1]).Name -eq 'labelOffsetXEditBox' -and (RowControl $labelOffsets.Items[1]).Label.EndsWith('水平偏移')) 'horizontal offset is the second row'
 Check ((RowControl $labelOffsets.Items[0]).SizeString -eq (RowControl $labelOffsets.Items[1]).SizeString) 'both offset inputs use the same width'
+Check ((RowControl $labelOffsets.Items[0]).SizeString -eq '0000' -and (RowControl $labelOffsets.Items[1]).SizeString -eq '0000') 'offset combos keep the 列数量 input width'
+Check (@((RowControl $labelOffsets.Items[0]).GetType().Name,(RowControl $labelOffsets.Items[1]).GetType().Name | Where-Object {$_ -match 'ComboBox'}).Count -eq 2) 'offset inputs are dropdown combos like the title group'
+Check ((@((RowControl $labelOffsets.Items[0]).Items | ForEach-Object {$_.Label}) -join ',') -eq '-20,-10,-5,0,5,10,20') 'offset presets match the title group values'
 Check ($labelOffsets.Items[2].Items.Count -eq 2) 'third row holds two controls'
 Check (@($labelOffsets.Items[2].Items | ForEach-Object {$_.Label}) -join ',' -eq '加粗,编号自动更新') 'bold and auto-update labels preserved'
 foreach($toggle in $labelOffsets.Items[2].Items) {
@@ -136,7 +139,7 @@ $labelXml=$xml.SelectSingleNode('//r:group[@id="group1"]',$ns)
 Check ($labelXml.SelectNodes('./r:box[@boxStyle="vertical"]',$ns).Count -eq 3) 'label group serializes three vertical columns'
 Check ($labelXml.SelectNodes('./r:separator',$ns).Count -eq 2) 'label columns stay separated in serialized XML'
 Check ($labelXml.SelectNodes('./r:box[@boxStyle="vertical"]/r:box[@boxStyle="horizontal"]',$ns).Count -eq 3) 'every label column ends with a horizontal row'
-Check ($labelXml.SelectNodes('.//r:comboBox[@sizeString="0000"]',$ns).Count -ge 3) 'second label column keeps the 列数量 input width in XML'
+Check ($labelXml.SelectNodes('.//r:comboBox[@sizeString="0000"]',$ns).Count -ge 5) 'label combo boxes keep the 列数量 input width in XML'
 Check (@($xml.SelectNodes('//*[@id]') | Group-Object id | Where-Object Count -gt 1).Count -eq 0) 'serialized control IDs are unique'
 [IO.File]::WriteAllText((Join-Path $output 'vsto-ribbon.xml'),$xml.OuterXml)
 if($CreatePreview) {
