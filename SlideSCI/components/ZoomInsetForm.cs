@@ -126,7 +126,7 @@ namespace SlideSCI
             cardTarget.Controls.Add(SectionHeader("放大尺寸", 0, 0));
 
             segTarget = new SegmentedControl { Bounds = new Rectangle(14, 36, 456, 30) };
-            segTarget.SetItems("与原图等宽", "指定放大倍数", "自定义宽度 (cm)");
+            segTarget.SetItems("与原图等宽", "原图宽度倍数", "自定义宽度 (cm)");
             segTarget.SelectedIndex = (int)s.TargetMode;
             segTarget.SelectionChanged += (sender, args) =>
             {
@@ -144,7 +144,7 @@ namespace SlideSCI
             };
             cardTarget.Controls.Add(lblActiveInput);
 
-            numMagnification = CreateNumber(0.1m, 100m, (decimal)s.Magnification, 0.1m, 1, "放大倍数");
+            numMagnification = CreateNumber(0.1m, 100m, (decimal)s.Magnification, 0.1m, 1, "原图宽度倍数");
             numMagnification.Bounds = new Rectangle(132, 98, 110, 26);
             numMagnification.ValueChanged += (sender, args) => UpdatePreview();
             cardTarget.Controls.Add(numMagnification);
@@ -400,7 +400,7 @@ namespace SlideSCI
             bool multiple = segTarget.SelectedIndex == (int)ZoomTargetMode.Multiple;
             bool custom = segTarget.SelectedIndex == (int)ZoomTargetMode.CustomWidthCm;
 
-            lblActiveInput.Text = multiple ? "放大倍数" : custom ? "放大图宽度 (cm)" : "";
+            lblActiveInput.Text = multiple ? "原图宽度倍数" : custom ? "放大图宽度 (cm)" : "";
             numMagnification.Visible = multiple;
             numCustomWidth.Visible = custom;
         }
@@ -453,8 +453,8 @@ namespace SlideSCI
             if (segTarget.SelectedIndex == (int)ZoomTargetMode.Multiple)
             {
                 float factor = (float)numMagnification.Value;
-                targetWidth = boxWidth * factor;
-                targetHeight = boxHeight * factor;
+                targetWidth = pictureWidth * factor;
+                targetHeight = boxHeight * targetWidth / boxWidth;
             }
             else if (segTarget.SelectedIndex == (int)ZoomTargetMode.CustomWidthCm)
             {

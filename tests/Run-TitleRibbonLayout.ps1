@@ -115,8 +115,8 @@ foreach($column in $zoom.Items) { Check ($column.Items.Count -eq 3) 'zoom column
 Check ($col1.Items[0].Items[0].Label -eq '框选区域' -and $col2.Items[0].Items[0].Label -eq '放大选区') 'zoom action labels updated'
 Check ($col1.Items[0].Items[0].ShowImage -and $col2.Items[0].Items[0].ShowImage) 'zoom actions retain icons'
 Check ($col1.Items[1].Items[0].SizeString -eq $col2.Items[1].Items[0].SizeString) 'zoom size fields use identical widths'
-Check ($col1.Items[1].Items[0].SizeString -eq '00%') 'size width reserves space for visible units'
-Check ((@($col2.Items[1].Items[0].Items | ForEach-Object {$_.Label}) -join ',') -eq '1x,2x,3x,4x,5x,10x') 'only requested magnification presets are offered'
+Check ($col1.Items[1].Items[0].SizeString -eq '000%') 'size width reserves space for visible units'
+Check ((@($col2.Items[1].Items[0].Items | ForEach-Object {$_.Label}) -join ',') -eq '1/3x,1/2x,1x,2x,3x,4x,5x,10x') 'only requested magnification presets are offered'
 Check (@($col1.Items[1].Items[0].Items | Where-Object {$_.Label -notlike '*%'}).Count -eq 0) 'percentage presets display their unit'
 foreach($column in @($col1,$col2)) {
  Check ($column.Items[2].Items.Count -eq 2 -and $column.Items[2].Items[0].GetType().Name -match 'Label') 'stroke label is independent of the menu'

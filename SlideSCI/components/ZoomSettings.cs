@@ -36,7 +36,27 @@ namespace SlideSCI
         public static ZoomSettings CreateDefault() => new ZoomSettings();
 
         public static bool TryParsePercent(string text, out float value) => TryParseUnit(text, "%", 5f, 90f, out value);
-        public static bool TryParseMagnification(string text, out float value) => TryParseUnit(text, "x", 0.1f, 100f, out value);
+        public static bool TryParseMagnification(string text, out float value)
+        {
+            string input = (text ?? "").Trim().Replace("×", "x");
+            if (input.EndsWith("x", StringComparison.OrdinalIgnoreCase))
+                input = input.Substring(0, input.Length - 1).TrimEnd();
+            string[] fraction = input.Split('/');
+            if (fraction.Length == 1) return TryParseUnit(input, "", 0.1f, 100f, out value);
+            value = 0;
+            if (fraction.Length != 2 ||
+                !TryParseUnit(fraction[0], "", 0.0001f, 10000f, out float numerator) ||
+                !TryParseUnit(fraction[1], "", 0.0001f, 10000f, out float denominator)) return false;
+            value = numerator / denominator;
+            return value >= 0.1f && value <= 100f;
+        }
+
+        public static string FormatMagnification(float value)
+        {
+            if (Math.Abs(value - 1f / 3f) < 0.000001f) return "1/3x";
+            if (Math.Abs(value - 0.5f) < 0.000001f) return "1/2x";
+            return value.ToString("0.######", System.Globalization.CultureInfo.CurrentCulture) + "x";
+        }
 
         private static bool TryParseUnit(string text, string unit, float min, float max, out float value)
         {

@@ -51,6 +51,11 @@ internal static class CoreRegression
         try
         {
             float parsed;
+            Check(ZoomSettings.TryParseMagnification("1/2x", out parsed) && parsed == 0.5f, "half original width preset");
+            Check(ZoomSettings.TryParseMagnification("1/3", out parsed) && Math.Abs(parsed - 1f / 3f) < 0.000001f && ZoomSettings.FormatMagnification(parsed) == "1/3x", "third width survives display round trip");
+            Check(ZoomSettings.TryParseMagnification("1×", out parsed) && parsed == 1, "multiplication sign supported");
+            foreach (string fraction in new[] { "1/0", "1/2/3", "NaN/2", "1/Infinity", "1/20", "1/2xx" })
+                Check(!ZoomSettings.TryParseMagnification(fraction, out parsed), "reject invalid fraction " + fraction);
             Check(ZoomSettings.TryParsePercent("25%", out parsed) && parsed == 25f && ZoomSettings.TryParsePercent("25", out parsed) && parsed == 25f, "percentage accepts explicit or omitted unit");
             Check(ZoomSettings.TryParseMagnification("10x", out parsed) && parsed == 10f && ZoomSettings.TryParseMagnification("1", out parsed) && parsed == 1f, "magnification accepts explicit or omitted unit");
             foreach (string invalidInput in new[] { "NaN", "Infinity", "0", "101x", "2xx", "5cm", "原图等宽", "" })

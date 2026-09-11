@@ -8,8 +8,8 @@ namespace SlideSCI
 {
     public partial class Ribbon1
     {
-        // Reserve the displayed unit as well as two digits (90% / 10x).
-        private const string ZoomNumberSize = "00%";
+        // Reserve the displayed unit as well as fraction presets (1/3x).
+        private const string ZoomNumberSize = "000%";
         private ZoomSettings zoomRibbonSettings;
         private RibbonComboBox zoomSizeCombo, zoomGapCombo;
         private RibbonToggleButton zoomGroupCheck;
@@ -57,9 +57,9 @@ namespace SlideSCI
             zoomSizeCombo.Label = LabelInset + "尺寸";
             zoomSizeCombo.SizeString = ZoomNumberSize;
             zoomSizeCombo.ScreenTip = "放大图尺寸";
-            zoomSizeCombo.SuperTip = "输入放大倍数，如 2 或 2x；默认 1x，始终保持选区宽高比。";
-            foreach (string value in new[] { "1x", "2x", "3x", "4x", "5x", "10x" }) AddZoomItem(zoomSizeCombo, value);
-            zoomSizeCombo.Text = zoomRibbonSettings.Magnification.ToString("0.##", CultureInfo.CurrentCulture) + "x";
+            zoomSizeCombo.SuperTip = "相对幻灯片上原图宽度：1x 与原图等宽，1/2x 为一半，1/3x 为三分之一；默认 1x，高度保持选区比例。";
+            foreach (string value in new[] { "1/3x", "1/2x", "1x", "2x", "3x", "4x", "5x", "10x" }) AddZoomItem(zoomSizeCombo, value);
+            zoomSizeCombo.Text = ZoomSettings.FormatMagnification(zoomRibbonSettings.Magnification);
             generate.Items.Add(zoomSizeCombo);
             zoomLineMenu = CreateZoomStrokeMenu("连线", false);
             WrapRibbonRows(generate, "zoomGenerate");
@@ -184,7 +184,7 @@ namespace SlideSCI
             if (!TryParseFloat(zoomGapCombo.Text, out float gap) || float.IsNaN(gap) || float.IsInfinity(gap) || gap < 0 || gap > ZoomInsetHelper.CmToPoints(50))
             { MessageBox.Show("图间距请输入 0–1417 pt。", "局部放大"); return null; }
             if (!ZoomSettings.TryParseMagnification(zoomSizeCombo.Text, out float value))
-            { MessageBox.Show("尺寸请输入 0.1–100 的倍数，可省略 x。", "局部放大"); return null; }
+            { MessageBox.Show("尺寸请输入相对原图宽度的倍数（0.1–100），支持 1/2、1/3，可省略 x。", "局部放大"); return null; }
             zoomRibbonSettings.TargetMode = ZoomTargetMode.Multiple;
             zoomRibbonSettings.Magnification = value;
             zoomRibbonSettings.BoxPercent = percent;

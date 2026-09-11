@@ -11,7 +11,7 @@ namespace SlideSCI
     {
         /// <summary>Use the source picture width and preserve the selection aspect ratio.</summary>
         SameAsOriginal = 0,
-        /// <summary>Scale both selection dimensions by the same factor.</summary>
+        /// <summary>Scale source picture width and preserve selection aspect ratio.</summary>
         Multiple = 1,
         /// <summary>Use a width in centimetres and preserve the selection aspect ratio.</summary>
         CustomWidthCm = 2
@@ -229,9 +229,9 @@ namespace SlideSCI
             switch (mode)
             {
                 case ZoomTargetMode.Multiple:
-                    float factor = magnification > 0 ? magnification : 2f;
-                    targetWidth = boxWidth * factor;
-                    targetHeight = boxHeight * factor;
+                    float factor = magnification > 0 ? magnification : 1f;
+                    targetWidth = Math.Max(0.1f, picture?.Width ?? boxWidth) * factor;
+                    targetHeight = boxHeight * targetWidth / boxWidth;
                     break;
                 case ZoomTargetMode.CustomWidthCm:
                     targetWidth = CmToPoints(Math.Max(0.1f, customWidthCm));
@@ -288,7 +288,7 @@ namespace SlideSCI
                     result.Error = cropError;
                     return result;
                 }
-                if (!TryComputeInsetPosition(app, picture, targetWidth, targetHeight,
+                if (!TryComputeInsetPosition(slide, picture, targetWidth, targetHeight,
                     Math.Max(0f, gapPoints), out float insetLeft, out float insetTop,
                     out string placementWarning, out string placementError))
                 {
@@ -329,8 +329,21 @@ namespace SlideSCI
                 }
 
                 PowerPoint.Shape draftPicture = duplicate;
-                try { ZoomNativeGeometry.ReplaceWithNativeSites(app, slide, ref box, ref duplicate); }
-                finally { try { draftPicture.Delete(); } catch { } }
+                string connectionWarning = null;
+                try
+                {
+                    ZoomNativeGeometry.ReplaceWithNativeSites(app, slide, ref box, ref duplicate);
+                    try { draftPicture.Delete(); } catch { }
+                }
+                catch (Exception ex)
+                {
+                    // The native-site round trip is optional. Keep the exact crop
+                    // and duplicate the box so the existing inset remains intact
+                    // until the replacement is ready to commit.
+                    System.Diagnostics.Trace.TraceWarning("Zoom connection sites: {0}", ex.Message);
+                    box = box.Duplicate()[1];
+                    connectionWarning = "原生角点连接不可用，已使用普通连接点生成放大图。";
+                }
                 box.Name = MakeInsetName(artifactKey, "Box");
                 box.Line.ForeColor.RGB = boxColorRgb;
                 box.Line.Weight = boxLineWeight;
@@ -400,7 +413,7 @@ namespace SlideSCI
                     if (created.Name.StartsWith(pendingPrefix, StringComparison.Ordinal))
                         created.Name = InsetNamePrefix + finalKey + "_" + created.Name.Substring(pendingPrefix.Length);
                 box.Name = finalBoxName;
-                result.Warning = placementWarning;
+                result.Warning = connectionWarning == null ? placementWarning : AppendWarning(placementWarning, connectionWarning);
                 if (!result.Glued)
                 {
                     result.Warning = AppendWarning(result.Warning,
@@ -458,10 +471,10 @@ namespace SlideSCI
                 return false;
             }
 
-            float existingLeft = Math.Max(0f, picture.PictureFormat.CropLeft);
-            float existingRight = Math.Max(0f, picture.PictureFormat.CropRight);
-            float existingTop = Math.Max(0f, picture.PictureFormat.CropTop);
-            float existingBottom = Math.Max(0f, picture.PictureFormat.CropBottom);
+            float existingLeft = picture.PictureFormat.CropLeft;
+            float existingRight = picture.PictureFormat.CropRight;
+            float existingTop = picture.PictureFormat.CropTop;
+            float existingBottom = picture.PictureFormat.CropBottom;
             float visibleOriginalWidth = originalWidth - existingLeft - existingRight;
             float visibleOriginalHeight = originalHeight - existingTop - existingBottom;
             if (visibleOriginalWidth <= GeometryTolerance || visibleOriginalHeight <= GeometryTolerance)
@@ -474,6 +487,10 @@ namespace SlideSCI
             float rightRatio = Clamp((picRight - boxRight) / picture.Width, 0f, 1f);
             float topRatio = Clamp((boxTop - picTop) / picture.Height, 0f, 1f);
             float bottomRatio = Clamp((picBottom - boxBottom) / picture.Height, 0f, 1f);
+            if (picture.HorizontalFlip == MsoTriState.msoTrue)
+            { float swap = leftRatio; leftRatio = rightRatio; rightRatio = swap; }
+            if (picture.VerticalFlip == MsoTriState.msoTrue)
+            { float swap = topRatio; topRatio = bottomRatio; bottomRatio = swap; }
 
             crop = new CropGeometry
             {
@@ -518,7 +535,7 @@ namespace SlideSCI
             }
         }
 
-        private static bool TryComputeInsetPosition(PowerPoint.Application app,
+        private static bool TryComputeInsetPosition(PowerPoint.Slide slide,
             PowerPoint.Shape picture, float width, float height, float gap,
             out float left, out float top, out string warning, out string error)
         {
@@ -531,8 +548,9 @@ namespace SlideSCI
 
             try
             {
-                slideWidth = app.ActivePresentation.PageSetup.SlideWidth;
-                slideHeight = app.ActivePresentation.PageSetup.SlideHeight;
+                var presentation = (PowerPoint.Presentation)slide.Parent;
+                slideWidth = presentation.PageSetup.SlideWidth;
+                slideHeight = presentation.PageSetup.SlideHeight;
             }
             catch
             {

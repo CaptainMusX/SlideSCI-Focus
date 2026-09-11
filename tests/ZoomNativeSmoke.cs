@@ -8,6 +8,16 @@ using P = Microsoft.Office.Interop.PowerPoint;
 class ZoomNativeSmoke
 {
     static void Check(bool ok, string name) { if (!ok) throw new Exception(name); Console.WriteLine("PASS " + name); }
+    static float[] Crop(P.Shape source, P.Shape box)
+    {
+        object[] args = { source, box, null, null };
+        var method = typeof(ZoomInsetHelper).GetMethod("TryBuildCropGeometry", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Check((bool)method.Invoke(null, args), "crop geometry accepted");
+        var values = new List<float>();
+        foreach (string field in new[] { "Left", "Right", "Top", "Bottom" })
+            values.Add((float)args[2].GetType().GetField(field, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(args[2]));
+        return values.ToArray();
+    }
     static List<P.Shape> All(P.Slide slide)
     {
         var list = new List<P.Shape>();
@@ -33,6 +43,26 @@ class ZoomNativeSmoke
             P.Shape source = slide.Shapes.AddPicture(image, MsoTriState.msoFalse, MsoTriState.msoTrue, 100, 60, 140, 140);
             P.Shape box = ZoomInsetHelper.InsertZoomBox(slide, source, 40);
             string name = box.Name;
+            foreach (float factor in new[] { 1f, 0.5f, 1f / 3f, 2f })
+            {
+                box.Height = 28;
+                float width, height;
+                ZoomInsetHelper.ComputeTargetSize(source, box, ZoomTargetMode.Multiple, factor, 10, out width, out height);
+                Check(Math.Abs(width - source.Width * factor) < 0.01f && Math.Abs(height / width - 0.5f) < 0.001f, "original width preset and rectangular aspect " + factor);
+            }
+            box.Height = box.Width;
+            box.Left = source.Left + 10; box.Top = source.Top + 15;
+            float[] normalCrop = Crop(source, box);
+            source.Flip(MsoFlipCmd.msoFlipHorizontal);
+            source.Flip(MsoFlipCmd.msoFlipVertical);
+            float[] flippedCrop = Crop(source, box);
+            Check(Math.Abs(normalCrop[0] - flippedCrop[1]) < 0.01f && Math.Abs(normalCrop[2] - flippedCrop[3]) < 0.01f, "flipped crop follows displayed selection");
+            source.Flip(MsoFlipCmd.msoFlipHorizontal); source.Flip(MsoFlipCmd.msoFlipVertical);
+            source.PictureFormat.CropLeft = -10;
+            box.Left = source.Left;
+            Check(Math.Abs(Crop(source, box)[0] + 10) < 0.01f, "negative crop margin preserved");
+            source.PictureFormat.CropLeft = 0;
+            box.Left = source.Left + 10;
             for (int round = 0; round < 5; round++)
             {
                 box = All(slide).Find(b => b.Name == name);
@@ -90,10 +120,17 @@ class ZoomNativeSmoke
                 Environment.SetEnvironmentVariable("TMP", blockedTemp);
                 var failed = ZoomInsetHelper.GenerateZoomInset(slide, box, source, 140, 140, 10, ZoomLineStyle.JournalFunnel,
                     1, 1.5f, 0, 0, MsoLineDashStyle.msoLineDash, false, app);
-                Check(!failed.Ok, "injected staging save failure");
-                Check(All(slide).Count == previousCount && All(slide).Exists(b => b.Name == name), "failure preserves previous inset and box without draft debris");
+                Check(failed.Ok && !string.IsNullOrEmpty(failed.Warning), "staging save failure falls back with warning");
+                Check(All(slide).Count == previousCount + 2 && All(slide).Exists(b => b.Name == name), "fallback replaces previous inset without draft debris");
             }
             finally { Environment.SetEnvironmentVariable("TEMP", oldTemp); Environment.SetEnvironmentVariable("TMP", oldTmp); }
+            box = All(slide).Find(b => b.Name == name);
+            previousCount = All(slide).Count;
+            box.Left = source.Left - 20;
+            var invalid = ZoomInsetHelper.GenerateZoomInset(slide, box, source, 140, 140, 10, ZoomLineStyle.JournalFunnel,
+                1, 1.5f, 0, 0, MsoLineDashStyle.msoLineDash, false, app);
+            Check(!invalid.Ok && All(slide).Count == previousCount, "invalid selection preserves existing inset");
+            box.Left = source.Left + 20;
             doc.SaveAs(Path.Combine(args[0], "zoom-native-test.pptx"), P.PpSaveAsFileType.ppSaveAsOpenXMLPresentation, MsoTriState.msoFalse);
             slide.Export(Path.Combine(args[0], "zoom-native-test.png"), "PNG", 1200, 900);
             return 0;
