@@ -33,6 +33,12 @@ internal static class CoreRegression
 
     private static int Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--read-settings")
+        {
+            var restored = Load(args[1]);
+            return restored.Magnification == 1f / 3f && restored.BoxPercent == 25f
+                && restored.RecentStrokeColors == "123,456" ? 0 : 1;
+        }
         // Act as a controllable child process for the real converter.
         if (args.Length > 0)
         {
@@ -50,6 +56,11 @@ internal static class CoreRegression
         Directory.CreateDirectory(directory);
         try
         {
+            Check(System.Configuration.ConfigurationManager.AppSettings["EnableWindowsFormsHighDpiAutoResizing"] == "true"
+                && System.Configuration.ConfigurationManager.AppSettings["DpiAwareness"] == "PerMonitorV2",
+                "deployed configuration initializes and retains DPI settings");
+            Check(System.Configuration.ConfigurationManager.GetSection("userSettings/SlideSCI.Properties.Settings") != null,
+                "deployed user settings section loads");
             float parsed;
             Check(ZoomSettings.TryParseMagnification("1/2x", out parsed) && parsed == 0.5f, "half original width preset");
             Check(ZoomSettings.TryParseMagnification("1/3", out parsed) && Math.Abs(parsed - 1f / 3f) < 0.000001f && ZoomSettings.FormatMagnification(parsed) == "1/3x", "third width survives display round trip");
@@ -89,6 +100,16 @@ internal static class CoreRegression
                 Check(!Save(new ZoomSettings { Magnification = 9f }, current), "locked destination reports failure");
             Check(File.ReadAllText(current) == before && Directory.GetFiles(directory, "*.tmp").Length == 0,
                 "failed replace preserves old file and removes temporary file");
+
+            foreach (float factor in new[] { 1f, 0.5f, 1f / 3f })
+                Check(Save(new ZoomSettings { Magnification = factor, BoxPercent = 25f, RecentStrokeColors = "123,456" }, current)
+                    && Load(current).Magnification == factor, "consecutive preset save and reload " + factor);
+            using (var reader = Process.Start(new ProcessStartInfo(Assembly.GetExecutingAssembly().Location,
+                "--read-settings \"" + current + "\"") { UseShellExecute = false, CreateNoWindow = true }))
+            {
+                if (!reader.WaitForExit(10000)) { reader.Kill(); throw new Exception("Settings reader timed out"); }
+                Check(reader.ExitCode == 0, "new process restores saved settings with deployed configuration");
+            }
 
             string scriptDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "latex-converter");
             Directory.CreateDirectory(scriptDirectory);
